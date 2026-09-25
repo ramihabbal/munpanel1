@@ -9,7 +9,7 @@
 <body>
   <div id="loginView" class="login-shell">
     <div class="login-card">
-      <img src="assets/hhhsmu-logo.png" class="login-logo" alt="HHHSMUN">
+      <img src="hhhsmu-logo.png" class="login-logo" alt="HHHSMUN">
       <div class="eyebrow">CONFERENCE MANAGEMENT SYSTEM</div>
       <h1>Administration sign in</h1>
       <p class="muted">Authorized conference staff only.</p>
@@ -35,7 +35,7 @@
 
   <div id="appView" class="app hidden">
     <aside class="sidebar">
-      <div class="brand"><img src="assets/hhhsmu-logo.png" alt="HHHSMUN"></div>
+      <div class="brand"><img src="hhhsmu-logo.png" alt="HHHSMUN"></div>
       <div class="role-chip" id="roleChip"></div>
       <nav id="nav"></nav>
       <div class="sidebar-bottom">
@@ -178,9 +178,8 @@ function openLogisticsRequest(){
  if(!["chair","president"].includes(state.role))return alert("You do not have permission to submit a committee logistics request.");
  const items=[
   ["Scissors","reusable"],["Stapler","reusable"],["Cardboard","consumable"],["Sticky notes","consumable"],
-  ["Markers","consumable"],["Colored paper","consumable"],["Printer paper","consumable"],["Clear Tape","consumable"],
-  ["Gluestick","consumable"],["String / ribbon","consumable"],["paint","consumable"],["Colored Markers","consumable"],
-  ["Liquid Glue","consumable"],["Brushes","consumable"],["paint","consumable"],["Glitter","consumable"],["Masking Tape","consumable"]
+  ["Markers","consumable"],["Colored paper","consumable"],["Printer paper","consumable"],["Tape","consumable"],
+  ["Glue","consumable"],["String / ribbon","consumable"],["Folders","reusable"],["Name tags","consumable"]
  ];
  const rows=items.map((x,i)=>`<div class="logistics-item-row">
    <label><input type="checkbox" class="lrItemCheck" data-item="${esc(x[0])}" data-reusable="${x[1]==="reusable"}"> <strong>${esc(x[0])}</strong>${x[1]==="reusable"?` <span class="reusable-tag">Reusable</span>`:""}</label>
@@ -294,7 +293,7 @@ function openDelegateResolution(){openResolution()}
 // Keep the local chairing display fresh when a second tab is used as the screen.
 function openScreenWindow(){window.open(location.href.split("?")[0]+"?screen=1","hhhsmUNScreen","width=1400,height=900")}
 function renderScreenOnly(){document.body.innerHTML=`<div id="screenOnly" class="screen-only"></div>`;updateScreenOnly();setInterval(updateScreenOnly,1000)}
-function updateScreenOnly(){const d=loadData(),s=d.screen||{},c=d.committees.find(x=>x.id===s.committeeId),r=d.resolutions.find(x=>x.id===s.resolutionId);const t=Math.max(0,Number(s.timerSeconds)||0),mm=Math.floor(t/60),ss=t%60;document.getElementById("screenOnly").innerHTML=`<div class="screen-brand"><img src="assets/hhhsmu-logo.png" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(c?.name||"HHHSMUN")}</div><div class="screen-item">${esc(s.speaker||"Awaiting chair input")}</div><div class="screen-topic">${esc(s.topic||c?.fullName||"Awaiting committee activity")}</div>${s.motion?`<div class="screen-motion"><span>CURRENT MOTION</span><strong>${esc(s.motion)}</strong></div>`:""}<div class="screen-timer">${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}</div>${r?`<div class="screen-resolution"><strong>${esc(r.title)}</strong><span>${esc(r.status)}</span></div>`:""}</div>`}
+function updateScreenOnly(){const d=loadData(),s=d.screen||{},c=d.committees.find(x=>x.id===s.committeeId),r=d.resolutions.find(x=>x.id===s.resolutionId);const t=Math.max(0,Number(s.timerSeconds)||0),mm=Math.floor(t/60),ss=t%60;document.getElementById("screenOnly").innerHTML=`<div class="screen-brand"><img src="hhhsmu-logo.png" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(c?.name||"HHHSMUN")}</div><div class="screen-item">${esc(s.speaker||"Awaiting chair input")}</div><div class="screen-topic">${esc(s.topic||c?.fullName||"Awaiting committee activity")}</div>${s.motion?`<div class="screen-motion"><span>CURRENT MOTION</span><strong>${esc(s.motion)}</strong></div>`:""}<div class="screen-timer">${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}</div>${r?`<div class="screen-resolution"><strong>${esc(r.title)}</strong><span>${esc(r.status)}</span></div>`:""}</div>`}
 if(new URLSearchParams(location.search).get("screen")==="1"){renderScreenOnly()}
 setInterval(()=>{if(state.data?.screen?.timerRunning){if((Number(state.data.screen.timerSeconds)||0)>0){state.data.screen.timerSeconds--;state.data.screen.updated=Date.now();save()}else{state.data.screen.timerRunning=false;save()}}},1000);
 // Do not re-render the Chairing Panel every second: doing so destroys focus,
