@@ -172,6 +172,7 @@ function filterRows(q,id){q=q.toLowerCase();document.querySelectorAll(`#${id} tb
 // Core helpers used throughout the platform. Keep these global because page templates
 // are evaluated from inline handlers and template literals.
 const roles=window.roles;
+function uid(){return (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2,10)}`);}
 function esc(value){return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
 function committee(id){return state.data.committees.find(c=>c.id===id);}
 function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","advisory","chair"].includes(state.role);}
@@ -359,31 +360,7 @@ function clearData(){if(confirm("Clear all conference data saved in this browser
 function openDelegateResolution(){openResolution()}
 // Keep the local chairing display fresh when a second tab is used as the screen.
 function openScreenWindow(){window.open(location.href.split("?")[0]+"?screen=1","hhhsmUNScreen","width=1400,height=900")}
-function renderScreenOnly(){
-  const style=document.createElement("style");
-  style.id="hhhsmun-screen-inline-styles";
-  style.textContent=`html,body{margin:0!important;padding:0!important;width:100%;min-height:100%;background:#08111a!important}
-.screen-only{min-height:100vh;box-sizing:border-box;background:#08111a;color:#f5f7fa;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column;padding:clamp(28px,4vw,64px);overflow:hidden}
-.screen-brand{display:flex;align-items:center;justify-content:space-between;gap:32px;border-bottom:1px solid rgba(255,255,255,.14);padding-bottom:24px;margin-bottom:42px}
-.screen-brand img{display:block;width:min(360px,30vw);max-width:360px;height:auto;object-fit:contain;filter:brightness(0) invert(1)}
-.screen-brand span{font-size:clamp(18px,2vw,30px);font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.75}
-.screen-main{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;gap:18px;min-height:0}
-.screen-committee{font-size:clamp(22px,3vw,44px);font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.72}
-.screen-item{font-size:clamp(40px,7vw,104px);line-height:1.05;font-weight:800;max-width:90vw;overflow-wrap:anywhere}
-.screen-topic{font-size:clamp(22px,3.2vw,52px);line-height:1.2;max-width:82vw;color:#b9c7d4;overflow-wrap:anywhere}
-.screen-motion{margin-top:18px;max-width:80vw;padding:18px 28px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;gap:8px}
-.screen-motion span{font-size:14px;letter-spacing:.16em;font-weight:700;opacity:.6}
-.screen-motion strong{font-size:clamp(20px,2.5vw,36px);overflow-wrap:anywhere}
-.screen-timer{font-variant-numeric:tabular-nums;font-size:clamp(76px,13vw,190px);line-height:.95;font-weight:800;letter-spacing:.03em;margin-top:22px}
-.screen-resolution{display:flex;flex-direction:column;gap:6px;margin-top:22px;padding:16px 24px;border-radius:12px;background:rgba(255,255,255,.06);max-width:80vw}
-.screen-resolution strong{font-size:clamp(20px,2.4vw,34px)}
-.screen-resolution span{font-size:clamp(16px,1.8vw,24px);opacity:.7}
-@media(max-width:700px){.screen-only{padding:24px}.screen-brand{align-items:flex-start;flex-direction:column}.screen-brand img{width:260px}}`;
-  document.head.appendChild(style);
-  document.body.innerHTML=`<div id="screenOnly" class="screen-only"></div>`;
-  updateScreenOnly();
-  setInterval(updateScreenOnly,1000);
-}
+function renderScreenOnly(){document.body.innerHTML=`<div id="screenOnly" class="screen-only"></div>`;updateScreenOnly();setInterval(updateScreenOnly,1000)}
 async function updateScreenOnly(){let d=loadData();try{const {data}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();if(data?.data)d=data.data;}catch(e){}const s=d.screen||{},c=(d.committees||[]).find(x=>x.id===s.committeeId),r=(d.resolutions||[]).find(x=>x.id===s.resolutionId);let t=Math.max(0,Number(s.timerSeconds)||0);if(s.timerRunning&&s.updated)t=Math.max(0,t-Math.floor((Date.now()-Number(s.updated))/1000));const mm=Math.floor(t/60),ss=t%60;document.getElementById("screenOnly").innerHTML=`<div class="screen-brand"><img src="hhhsmu-logo.png" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(c?.name||"HHHSMUN")}</div><div class="screen-item">${esc(s.speaker||"Awaiting chair input")}</div><div class="screen-topic">${esc(s.topic||c?.fullName||"Awaiting committee activity")}</div>${s.motion?`<div class="screen-motion"><span>CURRENT MOTION</span><strong>${esc(s.motion)}</strong></div>`:""}<div class="screen-timer">${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}</div>${r?`<div class="screen-resolution"><strong>${esc(r.title)}</strong><span>${esc(r.status)}</span></div>`:""}</div>`}
 if(new URLSearchParams(location.search).get("screen")==="1"){renderScreenOnly()}
 setInterval(()=>{if(state.data?.screen?.timerRunning){if((Number(state.data.screen.timerSeconds)||0)>0){state.data.screen.timerSeconds--;state.data.screen.updated=Date.now();saveLocalOnly();if(remoteReady&&Date.now()-lastRemoteTimerSync>3000){lastRemoteTimerSync=Date.now();pushRemoteState()}}else{state.data.screen.timerRunning=false;state.data.screen.updated=Date.now();save();}}},1000);
