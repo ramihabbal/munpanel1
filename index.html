@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HHHSMUN Conference Management</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="loginView" class="login-shell">
+    <div class="login-card">
+      <img src="hhhsmu-logo.png" class="login-logo" alt="HHHSMUN">
+      <div class="eyebrow">CONFERENCE MANAGEMENT SYSTEM</div>
+      <h1>Administration sign in</h1>
+      <p class="muted">Authorized conference staff only.</p>
+      <label>Role</label>
+      <select id="accountType">
+        <option value="president">President</option>
+        <option value="deputy">Deputy President</option>
+        <option value="sg">Secretary-General</option>
+        <option value="logistics">Head of Logistics</option>
+        <option value="finance">Head of Finance</option>
+        <option value="training">Head of Training</option>
+        <option value="rapporteur">Head of Rapporteurs</option>
+        <option value="advisory">Advisory Panel</option>
+        <option value="chair">Chair</option>
+        <option value="delegate">Delegate</option>
+      </select>
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Enter password">
+      <button class="primary full" onclick="login()">Sign in</button>
+      <div id="loginError" class="error"></div>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand"><img src="hhhsmu-logo.png" alt="HHHSMUN"></div>
+      <div class="role-chip" id="roleChip"></div>
+      <nav id="nav"></nav>
+      <div class="sidebar-bottom">
+        <div class="conference-mini"><span>HHHSMUN</span><small>Conference Control</small></div>
+        <button class="logout" onclick="logout()">Sign out</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><div class="breadcrumb">HHHSMUN / <span id="pageName">Overview</span></div><h2 id="pageTitle">Conference overview</h2></div><div class="user-menu"><span id="remoteStatus" class="remote-status">Connecting shared storage…</span><span class="avatar" id="avatar"></span><span id="userName"></span></div></header>
+      <section id="content" class="content"></section>
+    </main>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL="https://pmpczworpdlhdwykddso.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_cTvTsx2PBQRZ_7qhPCBvuQ_ayEun0nF";
+const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let remoteReady=false;
+let remoteSaveTimer=null;
+let remoteError="";
+let lastRemoteTimerSync=0;
+
+async function pullRemoteState(){
+  try{
+    const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
+    if(error) throw error;
+    remoteReady=true; remoteError="";
+    if(data?.data && Object.keys(data.data).length){
+      state.data={...structuredClone(defaults),...data.data};
+      saveLocalOnly(); render();
+    } else {
+      await pushRemoteState();
+    }
+  }catch(e){
+    remoteReady=false; remoteError=e?.message||String(e);
+    console.error("Supabase connection failed:",e);
+    renderRemoteStatus();
+  }
+}
+async function ensureRemoteReady(){
+  if(remoteReady)return true;
+  try{
+    const {error}=await supabaseClient.from("conference_state").select("id").eq("id","main").maybeSingle();
+    if(error)throw error;
+    remoteReady=true; remoteError=""; return true;
+  }catch(e){
+    remoteReady=false; remoteError=e?.message||String(e);
+    alert("Shared storage is not connected yet. Supabase said: "+remoteError+"\n\nRun SUPABASE_SETUP.sql in Supabase SQL Editor, then reload the site.");
+    return false;
+  }
+}
+function renderRemoteStatus(){
+  const el=document.getElementById("remoteStatus");
+  if(el) el.textContent=remoteReady?"Shared storage connected":"Shared storage not connected";
+}
+function saveLocalOnly(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state.data))}catch(e){}}
+async function pushRemoteState(){
+  if(!remoteReady)return;
+  try{await supabaseClient.from("conference_state").upsert({id:"main",data:state.data,updated_at:new Date().toISOString()},{onConflict:"id"});}
+  catch(e){console.warn("Remote save failed",e)}
+}
+function scheduleRemoteSave(){
+  clearTimeout(remoteSaveTimer);
+  remoteSaveTimer=setTimeout(pushRemoteState,250);
+}
+const STORAGE_KEY="hhhsmUN_official_v2";
+const defaults={
+  committees:[],countries:[],staff:[],delegates:[],resolutions:[],resources:[],grades:[],logisticsRequests:[],notifications:[],screen:{committeeId:"",speaker:"",topic:"",mode:"",timer:"",timerSeconds:0,timerRunning:false,updated:0}
+};
+const loginPasswords={
+  president:"Copper!Lantern27",
+  deputy:"Marble#Orbit41",
+  sg:"Cedar!Atlas58",
+  logistics:"Harbor@Quartz63",
+  finance:"Maple#Signal74",
+  training:"Raven!Bridge26",
+  rapporteur:"Pine@Vector85",
+  advisory:"Summit@Advisory52",
+  chair:"Orbit#Cedar39",
+  delegate:"Lunar!Maple62"
+};
+window.roles={
+  president:{label:"President",name:"President",avatar:"P",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
+  deputy:{label:"Deputy President",name:"Deputy President",avatar:"DP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
+  sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
+  logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["settings","Settings"]]},
+  finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
+  training:{label:"Head of Training",name:"Head of Training",avatar:"HT",pages:[["overview","Overview"],["training","Training"],["resources","Resources"]]},
+  rapporteur:{label:"Head of Rapporteurs",name:"Head of Rapporteurs",avatar:"HR",pages:[["overview","Overview"],["rapporteur","Rapporteurs"],["resources","Resources"]]},
+  advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
+  chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["mycommittee","My Committee"],["screen","Chairing Screen"],["grading","Grading"],["resolutions","Resolution Papers"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
+  delegate:{label:"Delegate",name:"Delegate",avatar:"D",pages:[["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["resources","Resources"]]}
+};
+const passWords=["Cedar","Orbit","Maple","Harbor","Quartz","Atlas","Lantern","Signal","Raven","Vector","Summit","Comet","Pine","Marble","Copper","Lunar"];
+function generateCommitteePassword(){const a=passWords[Math.floor(Math.random()*passWords.length)],b=passWords[Math.floor(Math.random()*passWords.length)],n=Math.floor(10+Math.random()*90);return `${a}!${b}${n}`;}
+function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=(d.committees||[]).map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));return d}catch{return structuredClone(defaults)}}
+const state={role:null,page:"overview",data:loadData(),gradingCommittee:""};
+setTimeout(pullRemoteState,0);
+function save(){saveLocalOnly();scheduleRemoteSave();}
+const FILE_DB="hhhsmUN_resolution_files";
+function openFileDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(FILE_DB,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files");if(!db.objectStoreNames.contains("resources"))db.createObjectStore("resources")};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+async function storeResourceFile(id,file){
+  if(!(await ensureRemoteReady())) throw new Error(remoteError||"Supabase is not connected");
+  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+  const path=`resources/${id}-${safeName}`;
+  const {error}=await supabaseClient.storage.from("conference-files").upload(path,file,{upsert:true,contentType:file.type||undefined});
+  if(error)throw error;
+  return path;
+};
+function login(){
+ const type=document.getElementById("accountType").value,pass=document.getElementById("password").value;
+ if(pass!==loginPasswords[type]){document.getElementById("loginError").textContent="Incorrect password.";return}
+ state.role=type;state.page=window.roles[type].pages[0][0];document.getElementById("loginError").textContent="";document.getElementById("loginView").classList.add("hidden");document.getElementById("appView").classList.remove("hidden");renderShell();render();if(state.page==="delegatePortal")populateDelegateSubmitters();
+}
+function logout(){state.role=null;document.getElementById("appView").classList.add("hidden");document.getElementById("loginView").classList.remove("hidden");document.getElementById("password").value=""}
+function renderShell(){const r=window.roles[state.role];document.getElementById("roleChip").textContent=r.label;document.getElementById("userName").textContent=r.name;document.getElementById("avatar").textContent=r.avatar;document.getElementById("nav").innerHTML=r.pages.map(p=>`<button class="nav-item ${state.page===p[0]?'active':''}" onclick="go('${p[0]}')"><span>${icon(p[0])}</span>${p[1]}</button>`).join("")}
+function icon(p){return ({overview:"⌂",committees:"▦",countries:"◎",staff:"♜",delegates:"♙",resolutions:"§",grading:"★",screen:"◉",mycommittee:"▦",delegatePortal:"§",myResolutions:"▤",finance:"$",training:"T",rapporteur:"R",resources:"▤",logisticsRequests:"!",settings:"⚙"})[p]||"•"}
+function go(p){
+  if(!Object.prototype.hasOwnProperty.call(pages,p)){console.error("Unknown page:",p);return;}
+  state.page=p;
+  renderShell();
+  render();
+}
+function render(){const titles={overview:["Overview","Conference overview"],committees:["Committees","Committee management"],countries:["Countries","Country registry"],staff:["Staff & Dais","Presidents, deputies, chairs and conference staff"],delegates:["Delegates","Delegate assignments"],resolutions:["Resolution Papers","Main and co-submitter workflow"],grading:["Grading","Committee grading system"],screen:["Chairing Screen","Live chairing panel display"],mycommittee:["My Committee","Committee control panel"],delegatePortal:["Delegate Portal","Delegate resolution paper submission"],myResolutions:["My Resolution Papers","Submitted resolution papers"],finance:["Finance","Finance department"],training:["Training","Training department"],rapporteur:["Rapporteurs","Rapporteur department"],resources:["Conference Resources","Background guides and conference files"],logisticsRequests:["Logistics Requests","Committee supply requests and notifications"],settings:["Data & settings","Local conference data"]};const t=titles[state.page]||titles.overview;document.getElementById("pageName").textContent=t[0];document.getElementById("pageTitle").textContent=t[1];const pageRenderer=Object.prototype.hasOwnProperty.call(pages,state.page)?pages[state.page]:pages.overview;try{document.getElementById("content").innerHTML=pageRenderer();}catch(err){console.error("Page render failed:",state.page,err);document.getElementById("content").innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Page error</h3><p>The ${esc(t[0])} page could not be rendered.</p></div></div><pre style="white-space:pre-wrap;color:#b91c1c">${esc(err?.message||String(err))}</pre></div>`;}renderRemoteStatus();if(state.page==="delegatePortal"){populateDelegateSubmitters();const dc=document.getElementById("dpCom");if(dc)dc.onchange=populateDelegateSubmitters}}
+function empty(title,text){return `<div class="empty-state"><strong>${title}</strong><p>${text}</p></div>`}
+function modal(title,body){document.getElementById("modal")?.remove();document.body.insertAdjacentHTML("beforeend",`<div id="modal" class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="panel-head"><h3>${title}</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">${body}</div></div></div>`)}
+function closeModal(){document.getElementById("modal")?.remove()}
+function formField(label,id,extra=""){return `<label class="form-label">${label}</label><input id="${id}" class="form-input" ${extra}>`}
+function selectField(label,id,options){return `<label class="form-label">${label}</label><select id="${id}" class="form-input">${options}</select>`}
+function metric(a,b,c){return `<div class="metric"><span>${a}</span><strong>${b}</strong><small>${c}</small></div>`}
+function filterRows(q,id){q=q.toLowerCase();document.querySelectorAll(`#${id} tbody tr`).forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?"":"none")}
+
+// Core helpers used throughout the platform. Keep these global because page templates
+// are evaluated from inline handlers and template literals.
+const roles=window.roles;
+function uid(){return (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2,10)}`);}
+function esc(value){return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function committee(id){return state.data.committees.find(c=>c.id===id);}
+function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","advisory","chair"].includes(state.role);}
+function canManage(){return ["president","deputy","sg","logistics","advisory"].includes(state.role);}
+
+const pages={
+ overview:()=>`<div class="permission-banner"><div><strong>${state.role==="advisory"?"Advisory Panel — full conference access":"Conference management"}</strong><p>${state.role==="advisory"?"The Advisory Panel can access conference-wide committees, countries, staff, delegates, resolutions, grading, screens, resources, finance, training, rapporteurs and logistics.":"Use the navigation to manage your assigned conference functions."}</p></div><span>${state.role==="advisory"?"FULL ACCESS":"HHHSMUN"}</span></div><div class="metric-grid">${metric("Committees",state.data.committees.length,"Configured by your team")}${metric("Countries",state.data.countries.length,"Registered")}${metric("Delegates",state.data.delegates.length,"Registered")}${metric("Resolution papers",state.data.resolutions.length,"Submitted")}</div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Conference structure</h3><p>Every committee is created and controlled here.</p></div><button class="text-btn" onclick="go('committees')">Manage →</button></div>${state.data.committees.length?`<div class="committee-list">${state.data.committees.map(c=>`<div class="committee-row"><div><strong>${esc(c.name)}</strong><small>${esc(c.fullName||"")}${c.room?" · "+esc(c.room):""}</small></div><span>${state.data.delegates.filter(d=>d.committee===c.id).length}</span><span class="status in-session">Configured</span></div>`).join("")}</div>`:empty("No committees yet","Create your committees from the Committees tab.")}</div><div class="panel"><div class="panel-head"><div><h3>Logistics requests</h3><p>Submit materials needed by any committee and send the request directly to Head of Logistics.</p></div><button class="primary" onclick="go('logisticsRequests')">Open logistics →</button></div></div><div class="panel"><div class="panel-head"><div><h3>Resolution workflow</h3><p>Delegate submissions are routed to the SG and chairing panel.</p></div></div><div class="ranking"><div class="rank"><b>1</b><span><strong>Draft</strong><small>Delegate selects main and co-submitters</small></span><strong>→</strong></div><div class="rank"><b>2</b><span><strong>SG review</strong><small>Secretary-General receives the paper</small></span><strong>→</strong></div><div class="rank"><b>3</b><span><strong>Chairing panel</strong><small>Chair can review and send it to the screen</small></span><strong>→</strong></div></div></div></div>`,
+ committees:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'committeeTable')" placeholder="Search committees..."></div>${canManage()?`<button class="primary" onclick="openCommittee()">+ Add committee</button>`:""}</div><div class="panel setup-note"><strong>Unlimited custom committees</strong><p>Create any committee you want. Each committee automatically gets its own President, Deputy President and Chair assignment area, a grading password, a resolution queue and a chairing screen.</p></div><div class="panel table-panel"><table id="committeeTable"><thead><tr><th>Committee</th><th>Full name</th><th>Room</th><th>Type</th><th>Dais</th><th>Grading</th><th></th></tr></thead><tbody>${state.data.committees.map(c=>{const dais=state.data.staff.filter(s=>s.committee===c.id);return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.fullName||"")}</td><td>${esc(c.room||"—")}</td><td>${esc(c.type||"—")}</td><td>${dais.filter(s=>["President","Deputy President","Chair"].includes(s.role)).length}/3</td><td><span class="access">Password assigned</span></td><td><button class="row-btn" onclick="openCommitteePanel('${c.id}')">Open panel</button> ${canManage()?`<button class="row-btn" onclick="openCommittee('${c.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('committees','${c.id}')">Delete</button>`:""}</td></tr>`}).join("")}</tbody></table>${!state.data.committees.length?empty("No committees","Use “Add committee” to create the conference structure."):""}</div>`,
+ countries:()=>countriesPanel(),
+ staff:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'staffTable')" placeholder="Search staff..."></div>${canManage()?`<button class="primary" onclick="openStaff()">+ Add staff member</button>`:""}</div><div class="panel table-panel"><table id="staffTable"><thead><tr><th>Name</th><th>Role</th><th>Committee</th><th></th></tr></thead><tbody>${state.data.staff.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td><span class="role-badge">${esc(s.role)}</span></td><td>${esc(committee(s.committee)?.name||"Conference-wide")}</td><td>${canManage()?`<button class="row-btn" onclick="openStaff('${s.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('staff','${s.id}')">Delete</button>`:""}</td></tr>`).join("")}</tbody></table>${!state.data.staff.length?empty("No staff added","Add the President, Deputy President, Chairs and conference heads."):""}</div><div class="settings-grid"><div class="setting"><label>Conference leadership</label><strong>President · Deputy President</strong><p>Conference-wide leadership roles retained from the original system.</p></div><div class="setting"><label>Operational heads</label><strong>Logistics · Finance · Training · Rapporteurs</strong><p>Separate management areas are available for each department.</p></div></div>`,
+ delegates:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'delegateTable')" placeholder="Search delegates..."></div>${canManage()?`<button class="primary" onclick="openDelegate()">+ Add delegate</button>`:""}</div><div class="panel table-panel"><table id="delegateTable"><thead><tr><th>Name</th><th>Country</th><th>Committee</th><th></th></tr></thead><tbody>${state.data.delegates.map(d=>`<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</td><td>${esc(committee(d.committee)?.name||"")}</td><td>${canManage()?`<button class="row-btn" onclick="openDelegate('${d.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('delegates','${d.id}')">Delete</button>`:""}</td></tr>`).join("")}</tbody></table>${!state.data.delegates.length?empty("No delegates","Add delegates after creating committees and countries."):""}</div>`,
+ resolutions:()=>{const incoming=state.data.resolutions.filter(r=>r.status!=="Archived");return `<div class="permission-banner"><div><strong>Resolution paper workflow</strong><p>Delegates submit papers with one or more main submitters and co-submitters. The paper becomes visible to the Secretary-General and the assigned chairing panel for review.</p></div><span>DELEGATE → SG → CHAIRING PANEL</span></div><div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'resolutionTable')" placeholder="Search papers, committees or submitters..."></div></div><div class="panel table-panel"><table id="resolutionTable"><thead><tr><th>Paper</th><th>Committee</th><th>Main submitters</th><th>Co-submitters</th><th>Status</th><th>Actions</th></tr></thead><tbody>${incoming.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${r.fileName?`<button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button>`:esc(r.clauses||"")}</small></td><td>${esc(committee(r.committee)?.name||"")}</td><td>${(r.main||[]).map(esc).join(", ")||"—"}</td><td>${(r.co||[]).map(esc).join(", ")||"—"}</td><td><span class="status ${r.status.toLowerCase().replaceAll(" ","-")}">${esc(r.status)}</span></td><td>${["president","deputy","sg","rapporteur","chair"].includes(state.role)?`<button class="row-btn" onclick="openResolution('${r.id}')">Review</button>`:""}</td></tr>`).join("")}</tbody></table>${!incoming.length?empty("No resolution papers","Submitted papers will appear here."):""}</div>`},
+ grading:()=>`<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>Enter a committee grading room</h3><p>Use the private grading password provided to your committee.</p></div></div>${state.gradingCommittee?gradingRoom():`<div class="panel"><div class="modal-body">${selectField("Committee","gradeCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}${formField("Committee grading password","gradePass",`type="password" placeholder="Enter private password" autocomplete="off"`)}<button class="primary full" onclick="enterGrading()">Enter grading system</button></div></div>`}`,
+ screen:()=>screenPage(),
+ mycommittee:()=>{const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name)||state.data.staff.find(s=>s.role==="Chair");return mine?committeePanel(mine.committee):empty("No committee assigned","Your Chair account has not been assigned to a committee yet.")},
+  delegatePortal:()=>`<div class="permission-banner"><div><strong>Delegate resolution portal</strong><p>Upload your resolution paper as a PDF or Word document. Select the main submitters and co-submitters. The paper is routed to the Secretary-General and assigned chairing panel.</p></div><span>UPLOAD → SG → CHAIR</span></div><div class="panel"><div class="panel-head"><div><h3>New resolution paper</h3><p>Accepted formats: PDF, DOC, DOCX · Maximum size: 20 MB.</p></div></div><div class="modal-body">${formField("Resolution title","dpTitle",`placeholder="Draft resolution title"`)}${selectField("Committee","dpCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="dpMain" class="form-input" multiple size="5"></select><label class="form-label">Co-submitters</label><select id="dpCo" class="form-input" multiple size="6"></select><label class="form-label">Resolution paper file</label><input id="dpFile" class="form-input file-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="showSelectedFile(this)"><div id="dpFileInfo" class="file-info">No file selected.</div><button class="primary full" onclick="submitDelegateResolution()">Upload and submit to SG and Chairing Panel</button></div></div>`,
+  myResolutions:()=>{const mine=state.data.resolutions;return `<div class="panel"><div class="panel-head"><div><h3>My resolution papers</h3><p>Submission status and routing.</p></div></div>${mine.length?mine.map(r=>`<div class="queue"><b>§</b><span><strong>${esc(r.title)}</strong><small>${esc(committee(r.committee)?.name||"")} · ${(r.main||[]).join(", ")}${r.fileName?` · <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">Download ${esc(r.fileName)}</button>`:""}</small></span><span class="award">${esc(r.status)}</span></div>`).join(""):empty("No papers submitted","Your submitted papers will appear here.")}</div>`},
+  finance:()=>`<div class="metric-grid">${metric("Delegates",state.data.delegates.length,"Finance tracking")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Countries",state.data.countries.length,"Registered")}${metric("Resolution papers",state.data.resolutions.length,"Submitted")}</div><div class="panel"><div class="panel-head"><div><h3>Finance department</h3><p>Conference-wide finance workspace.</p></div></div><div class="settings-actions"><button class="secondary" onclick="exportData()">Export conference data</button></div></div>`,
+  training:()=>`<div class="metric-grid">${metric("Committees",state.data.committees.length,"Training coverage")}${metric("Chairs",state.data.staff.filter(s=>s.role==="Chair").length,"Assigned")}${metric("Deputy Presidents",state.data.staff.filter(s=>s.role==="Deputy President").length,"Assigned")}${metric("Presidents",state.data.staff.filter(s=>s.role==="President").length,"Assigned")}</div><div class="panel"><div class="panel-head"><div><h3>Training department</h3><p>Manage training through the staff and dais assignments.</p></div><button class="primary" onclick="go('staff')">Open staff & dais</button></div></div>`,
+  rapporteur:()=>`<div class="metric-grid">${metric("Resolution papers",state.data.resolutions.length,"Received")}${metric("On chairing screen",state.data.resolutions.filter(r=>r.status==="On chairing screen").length,"Live")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates",state.data.delegates.length,"Registered")}</div><div class="panel"><div class="panel-head"><div><h3>Rapporteur department</h3><p>Track resolution papers and committee routing.</p></div><button class="primary" onclick="go('resolutions')">Open papers</button></div></div>`,
+
+ resources:()=>{const canUpload=isStaff();const rs=state.data.resources||[];return `<div class="toolbar"><div class="search">⌕ <input oninput="filterCards(this.value,'resourceGrid')" placeholder="Search resources..."></div>${canUpload?`<button class="primary" onclick="openResource()">+ Upload resource</button>`:""}</div><div class="panel"><div class="panel-head"><div><h3>Conference resources</h3><p>Background guides, study guides, rules, training material and other official files.</p></div></div>${rs.length?`<div id="resourceGrid" class="doc-grid">${rs.map(r=>{const c=committee(r.committee);return `<div class="doc resource-card"><div class="doc-type">${esc((r.fileType||"FILE").split("/").pop().toUpperCase())}</div><strong>${esc(r.title)}</strong><span>${esc(r.fileName)}${c?` · ${esc(c.name)}`:" · Conference-wide"}</span><small>${esc(r.description||"No description")}</small><button class="text-btn" onclick="downloadResourceFile('${r.id}')">Download</button>${canUpload?` <button class="row-btn" onclick="removeResource('${r.id}')">Remove</button>`:""}</div>`}).join("")}</div>`:empty("No resources uploaded","Staff and Dais members can upload official background guides and other conference files here.")}</div>`},
+logisticsRequests:()=>{const all=state.data.logisticsRequests||[];const canSubmit=["president","chair"].includes(state.role);const canManage=state.role==="logistics";const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);let visible=all;if(state.role==="chair")visible=all.filter(r=>r.committee===mine?.committee);return `<div class="toolbar">${canSubmit?`<button class="primary" onclick="openLogisticsRequest()">+ New logistics request</button>`:""}${canManage?`<button class="secondary" onclick="markAllLogisticsRead()">Mark notifications read</button>`:""}</div><div class="metric-grid">${metric("Requests",visible.length,"Submitted")}${metric("Pending",visible.filter(r=>r.status==="Pending").length,"Awaiting fulfillment")}${metric("Reusable",visible.filter(r=>r.reusable).length,"Return required")}${metric("Committees",new Set(visible.map(r=>r.committee)).size,"Requesting")}</div><div class="panel"><div class="panel-head"><div><h3>${canManage?"Logistics request inbox":"Committee logistics requests"}</h3><p>${canManage?"Requests submitted by Presidents and Dais appear here with their committee, item, amount and colour.":"Submit materials needed for committee decoration and setup."}</p></div></div>${visible.length?`<div class="logistics-request-list">${visible.slice().sort((a,b)=>b.createdAt-a.createdAt).map(r=>`<div class="logistics-request"><div><strong>${esc(committee(r.committee)?.name||"Unknown committee")}</strong><span>${esc(r.item)} · ${r.amount}${r.color?` · ${esc(r.color)}`:""}${r.reusable?` · <b>Reusable — return required</b>`:""}</span><small>${new Date(r.createdAt).toLocaleString()} · ${esc(r.requestedBy||"Committee")}</small></div><span class="status ${r.status==="Fulfilled"?"in-session":"break"}">${r.status}</span>${canManage?`<button class="row-btn" onclick="fulfillLogisticsRequest('${r.id}')">${r.status==="Fulfilled"?"Mark pending":"Mark fulfilled"}</button>`:""}</div>`).join("")}</div>`:empty("No logistics requests","No requests have been submitted yet.")}</div><div class="panel"><div class="panel-head"><div><h3>Materials terms</h3><p>Reusable materials such as scissors and staplers must be returned. Lost or unreturned reusable materials are subject to replacement costs under Secretariat policy.</p></div></div></div>`},
+settings:()=>`<div class="panel"><div class="panel-head"><div><h3>Saved data</h3><p>Data persists with localStorage on this browser. Export/import is useful for backups. Multi-device synchronization requires a server database.</p></div></div><div class="settings-actions"><button class="secondary" onclick="exportData()">Export backup</button><label class="secondary file-label">Import backup<input type="file" accept="application/json" onchange="importData(this.files[0])"></label><button class="row-btn danger" onclick="clearData()">Clear all data</button></div></div>`
+};
+
+function openCommittee(id=""){const x=committee(id)||{};modal(id?"Edit committee":"Add committee",`${formField("Committee abbreviation","fName",`value="${esc(x.name||"")}" placeholder="UNODC"`)}${formField("Official committee name","fFull",`value="${esc(x.fullName||"")}"`)}${formField("Room (optional)","fRoom",`value="${esc(x.room||"")}"`)}${formField("Committee type (optional)","fType",`value="${esc(x.type||"")}" placeholder="General Assembly, Crisis, Specialized..."`)}<label class="form-label">Description (optional)</label><textarea id="fDescription" class="form-input" rows="3" placeholder="Brief description">${esc(x.description||"")}</textarea><button class="primary full" onclick="saveCommittee('${id}')">Save committee</button>`)}
+function saveCommittee(id){const name=document.getElementById("fName").value.trim(),fullName=document.getElementById("fFull").value.trim(),room=document.getElementById("fRoom").value.trim(),type=document.getElementById("fType").value.trim(),description=document.getElementById("fDescription").value.trim();if(!name)return alert("Committee abbreviation is required.");const duplicate=state.data.committees.find(c=>c.name.toLowerCase()===name.toLowerCase()&&c.id!==id);if(duplicate)return alert("A committee with that abbreviation already exists.");const obj={id:id||uid(),name,fullName,room,type,description,gradingPassword:id?(committee(id)?.gradingPassword||generateCommitteePassword()):generateCommitteePassword()};const i=state.data.committees.findIndex(c=>c.id===id);i>=0?state.data.committees[i]=obj:state.data.committees.push(obj);save();closeModal();render()}
+function openCountry(id=""){const x=state.data.countries.find(x=>x.id===id)||{committees:[]};modal(id?"Edit country":"Add country",`${formField("Country name","fCountry",`value="${esc(x.name||"")}"`)}<label class="form-label">Committees where this country is available</label><div class="check-grid">${state.data.committees.length?state.data.committees.map(c=>`<label><input type="checkbox" name="fCom" value="${c.id}" ${(x.committees||[]).includes(c.id)?"checked":""}> ${esc(c.name)}</label>`).join(""):"<span class='muted'>Create committees first.</span>"}</div><button class="primary full" onclick="saveCountry('${id}')">Save country</button>`)}
+function saveCountry(id){const name=document.getElementById("fCountry").value.trim();if(!name)return alert("Country name is required.");const committees=[...document.querySelectorAll('input[name="fCom"]:checked')].map(x=>x.value),obj={id:id||uid(),name,committees};const i=state.data.countries.findIndex(x=>x.id===id);i>=0?state.data.countries[i]=obj:state.data.countries.push(obj);save();closeModal();render()}
+function openStaff(id=""){const x=state.data.staff.find(x=>x.id===id)||{};const rolesList=["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Chair"];modal(id?"Edit staff member":"Add staff member",`${formField("Full name","fStaff",`value="${esc(x.name||"")}"`)}${selectField("Role","fRole",rolesList.map(r=>`<option ${x.role===r?"selected":""}>${r}</option>`).join(""))}${selectField("Committee","fStaffCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveStaff('${id}')">Save staff member</button>`)}
+function saveStaff(id){const name=document.getElementById("fStaff").value.trim(),role=document.getElementById("fRole").value,com=document.getElementById("fStaffCom").value;if(!name)return alert("Name is required.");if(["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"].includes(role))com="";if(["President","Deputy President","Chair"].includes(role)&&com){const occupied=state.data.staff.find(s=>s.id!==id&&s.committee===com&&s.role===role);if(occupied)return alert(`This committee already has a ${role}.`)}const obj={id:id||uid(),name,role,committee:com};const i=state.data.staff.findIndex(x=>x.id===id);i>=0?state.data.staff[i]=obj:state.data.staff.push(obj);save();closeModal();render()}
+
+function countriesPanel(){const selected=state.countryCommittee||state.data.committees[0]?.id||"";const c=committee(selected);const countries=state.data.countries.filter(x=>(x.committees||[]).includes(selected));return `<div class="toolbar"><div class="field-inline"><label>Committee</label><select class="committee-selector" onchange="state.countryCommittee=this.value;render()">${state.data.committees.map(x=>`<option value="${x.id}" ${x.id===selected?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>${canManage()?`<button class="primary" onclick="openCountry()">+ Add country</button>`:""}</div><div class="panel"><div class="panel-head"><div><h3>${esc(c?.name||"Countries")}</h3><p>Select the attendance status for each country. Changes save automatically.</p></div><span class="status in-session">${countries.length} countries</span></div><div class="country-list"><div class="country-attendance-head"><strong>Country</strong><strong>Attendance</strong></div>${countries.length?countries.map(country=>{const att=(country.attendance||{})[selected]||"";return `<div class="country-panel-row"><strong>${esc(country.name)}</strong><select class="attendance-select" onchange="setCountryAttendance('${country.id}','${selected}',this.value)"><option value="">Select attendance</option><option value="Present" ${att==="Present"?"selected":""}>Present</option><option value="Present and Voting" ${att==="Present and Voting"?"selected":""}>Present and Voting</option><option value="Absent" ${att==="Absent"?"selected":""}>Absent</option></select></div>`}).join(""):`<div class="empty-state"><strong>No countries assigned to this committee yet.</strong><p>Add countries through the committee management panel.</p></div>`}</div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>${esc(c?.name||"")}</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Absent"].map(a=>{const n=countries.filter(x=>((x.attendance||{})[selected]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div>`}
+function openDelegate(id=""){const x=state.data.delegates.find(x=>x.id===id)||{};modal(id?"Edit delegate":"Add delegate",`${formField("Delegate name","fDel",`value="${esc(x.name||"")}"`)}${selectField("Committee","fDelCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}${selectField("Country","fDelCountry",`<option value="">Select country</option>`+state.data.countries.map(c=>`<option value="${c.id}" ${x.country===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveDelegate('${id}')">Save delegate</button>`)}
+function saveDelegate(id){const name=document.getElementById("fDel").value.trim(),committeeId=document.getElementById("fDelCom").value,country=document.getElementById("fDelCountry").value;if(!name||!committeeId||!country)return alert("Name, committee and country are required.");const allowed=state.data.countries.find(c=>c.id===country)?.committees||[];if(allowed.length&&!allowed.includes(committeeId))return alert("That country is not assigned to this committee.");const obj={id:id||uid(),name,committee:committeeId,country};const i=state.data.delegates.findIndex(x=>x.id===id);i>=0?state.data.delegates[i]=obj:state.data.delegates.push(obj);save();closeModal();render()}
+function openCommitteePanel(id){const c=committee(id);if(!c)return;modal(`${esc(c.name)} · Committee Panel`,committeePanel(id))}
+function committeePanel(id){const c=committee(id);if(!c)return empty("Committee not found","");const dais=state.data.staff.filter(s=>s.committee===id&&["President","Deputy President","Chair"].includes(s.role));const ds=state.data.delegates.filter(d=>d.committee===id);const assignedCountries=state.data.countries.filter(x=>(x.committees||[]).includes(id));return `<div class="committee-hero"><div><span class="eyebrow">${esc(c.name)}${c.room?" · "+esc(c.room):""}</span><h3>${esc(c.fullName||c.name)}</h3><p>${esc(c.description||"Committee management panel")}</p></div><span class="status in-session">${esc(c.type||"Committee")}</span></div><div class="metric-grid">${metric("President",dais.find(s=>s.role==="President")?.name||"Unassigned","Committee dais")}${metric("Deputy President",dais.find(s=>s.role==="Deputy President")?.name||"Unassigned","Committee dais")}${metric("Chair",dais.find(s=>s.role==="Chair")?.name||"Unassigned","Chairing panel")}${metric("Delegates",ds.length,"Assigned")}</div><div class="panel"><div class="panel-head"><div><h3>Committee Dais</h3><p>Assign people by name. Each Dais member is restricted to their assigned committee.</p></div></div><div class="settings-actions">${["President","Deputy President","Chair"].map(role=>`<button class="secondary" onclick="openDaisAssignment('${id}','${role}')">Assign ${role}</button>`).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Countries & delegates</h3><p>Add one country per line. Optionally use <strong>Country | Delegate Name</strong> to create the delegate assignment at the same time.</p></div></div><div class="modal-body"><textarea id="bulkCountries" class="form-input" rows="8" placeholder="Lebanon | Rami Haddad
+France | Nour Saleh
+Brazil | Karim Saab
+Japan"></textarea><button class="primary full" onclick="saveBulkCountries('${id}')">Save countries & delegate assignments</button><div class="mini-list">
+${assignedCountries.length?`<div class="attendance-head"><strong>Country</strong><strong>Delegate</strong><strong>Attendance</strong><strong>Action</strong></div>`:""}
+${assignedCountries.map(country=>{const d=ds.find(d=>d.country===country.id);const att=(country.attendance||{})[id]||"";return `<div class="country-attendance-row">
+<div><strong>${esc(country.name)}</strong></div>
+<div><span>${esc(d?.name||"No delegate assigned")}</span></div>
+<div><select class="attendance-select" aria-label="Attendance for ${esc(country.name)}" onchange="setCountryAttendance('${country.id}','${id}',this.value)">
+<option value="">Select attendance</option>
+<option value="Present" ${att==="Present"?"selected":""}>Present</option>
+<option value="Present and Voting" ${att==="Present and Voting"?"selected":""}>Present and Voting</option>
+<option value="Absent" ${att==="Absent"?"selected":""}>Absent</option>
+</select></div>
+<div><button class="row-btn danger" onclick="removeCountryFromCommittee('${country.id}','${id}')">Remove</button></div>
+</div>`}).join("")||'<div class="empty-state"><strong>No countries assigned yet.</strong><p>Add countries above, then choose Present or Present and Voting for each country.</p></div>'}
+</div></div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>Set each country's status above. Changes save automatically.</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Absent"].map(a=>{const n=assignedCountries.filter(c=>((c.attendance||{})[id]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Private grading password for this committee</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="primary" onclick="goToGrading('${id}')">Open grading</button><button class="secondary" onclick="setScreenCommittee('${id}')">Use on chairing screen</button><button class="secondary" onclick="rotateCommitteePassword('${id}')">Generate new password</button></div></div>`}
+function openDaisAssignment(committeeId,role){const current=state.data.staff.find(s=>s.committee===committeeId&&s.role===role);const names=state.data.staff.filter(s=>s.role===role&&(s.committee===committeeId||!s.committee));modal(`Assign ${role}`,`${formField("Full name","daisName",`value="${esc(current?.name||"")}" placeholder="Full name"`)}<p class="muted">This assignment only grants this Dais role access to the selected committee.</p><button class="primary full" onclick="saveDaisAssignment('${committeeId}','${role}','${current?.id||""}')">Save assignment</button>`) }
+function saveDaisAssignment(committeeId,role,id){const name=document.getElementById("daisName").value.trim();if(!name)return alert("Name is required.");let existing=state.data.staff.find(s=>s.id===id)||state.data.staff.find(s=>s.committee===committeeId&&s.role===role);if(existing){existing.name=name;existing.committee=committeeId;existing.role=role}else state.data.staff.push({id:uid(),name,role,committee:committeeId});save();closeModal();openCommitteePanel(committeeId)}
+function saveBulkCountries(committeeId){const lines=document.getElementById("bulkCountries").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return alert("Enter at least one country.");for(const line of lines){const parts=line.split("|").map(x=>x.trim());const countryName=parts[0],delegateName=parts[1]||"";if(!countryName)continue;let country=state.data.countries.find(c=>c.name.toLowerCase()===countryName.toLowerCase());if(!country){country={id:uid(),name:countryName,committees:[]};state.data.countries.push(country)}country.committees=country.committees||[];if(!country.committees.includes(committeeId))country.committees.push(committeeId);if(delegateName){let d=state.data.delegates.find(x=>x.committee===committeeId&&x.country===country.id);if(d)d.name=delegateName;else state.data.delegates.push({id:uid(),name:delegateName,committee:committeeId,country:country.id})}}save();closeModal();openCommitteePanel(committeeId)}
+function setCountryAttendance(countryId,committeeId,value){const c=state.data.countries.find(x=>x.id===countryId);if(!c)return;c.attendance=c.attendance||{};if(value)c.attendance[committeeId]=value;else delete c.attendance[committeeId];save();}
+function removeCountryFromCommittee(countryId,committeeId){const c=state.data.countries.find(x=>x.id===countryId);if(!c)return;if(!confirm("Remove this country from this committee?"))return;c.committees=(c.committees||[]).filter(x=>x!==committeeId);state.data.delegates=state.data.delegates.filter(d=>!(d.country===countryId&&d.committee===committeeId));save();openCommitteePanel(committeeId)}
+function openLogisticsRequest(){
+ const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
+ let committeeId=mine?.committee||"";
+ const isPresident=state.role==="president";
+ if(isPresident && !committeeId) committeeId="";
+ if(state.role==="chair" && !committeeId)return alert("Your Chair account is not assigned to a committee.");
+ if(!["chair","president"].includes(state.role))return alert("You do not have permission to submit a committee logistics request.");
+ const items=[
+  ["Scissors","reusable"],["Stapler","reusable"],["Cardboard","consumable"],["Sticky notes","consumable"],
+  ["Markers","consumable"],["Colored paper","consumable"],["Printer paper","consumable"],["Tape","consumable"],
+  ["Glue","consumable"],["String / ribbon","consumable"],["Folders","reusable"],["Name tags","consumable"]
+ ];
+ const rows=items.map((x,i)=>`<div class="logistics-item-row">
+   <label><input type="checkbox" class="lrItemCheck" data-item="${esc(x[0])}" data-reusable="${x[1]==="reusable"}"> <strong>${esc(x[0])}</strong>${x[1]==="reusable"?` <span class="reusable-tag">Reusable</span>`:""}</label>
+   <input class="form-input lrAmount" data-for="${i}" type="number" min="1" value="1" placeholder="Amount" disabled>
+   <input class="form-input lrColor" data-for="${i}" placeholder="Colour (if applicable)" disabled>
+ </div>`).join("");
+ modal("Committee logistics request",`
+   ${isPresident?`<label class="form-label">Committee</label><select id="lrCommittee" class="form-input">${state.data.committees.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.fullName||"")}</option>`).join("")}</select>`:`<div class="request-committee"><strong>${esc(committee(committeeId)?.name||"Your committee")}</strong><span>${esc(committee(committeeId)?.fullName||"")}</span></div>`}
+   <p class="muted">Select everything your committee needs for decoration, setup, or session use. Enter an amount for every selected item. Add a colour when the material can have different colours.</p>
+   <div class="logistics-items">${rows}</div>
+   <div class="other-request">
+     <label class="form-label"><input id="lrOtherCheck" type="checkbox"> Other</label>
+     <input id="lrOtherItem" class="form-input" placeholder="Describe another material" disabled>
+     <input id="lrOtherAmount" class="form-input" type="number" min="1" value="1" placeholder="Amount" disabled>
+     <input id="lrOtherColor" class="form-input" placeholder="Colour (if applicable)" disabled>
+     <label class="form-label"><input id="lrOtherReusable" type="checkbox"> Other item is reusable</label>
+   </div>
+   <div class="terms-box">
+     <strong>Materials receipt, return and replacement terms</strong>
+     <p>By accepting this request, I acknowledge that the committee is responsible for the materials issued to it. Reusable materials, including staplers, scissors, folders and other reusable equipment, must be returned to the Head of Logistics after use. If reusable materials are lost, damaged through misuse, or not returned, the responsible committee agrees to cover the replacement cost according to Secretariat policy.</p>
+     <label><input id="lrAgree" type="checkbox"> I agree to these materials terms on behalf of my committee.</label>
+   </div>
+   <button class="primary full" onclick="saveLogisticsRequest()">Send request to Head of Logistics</button>
+ `);
+ document.querySelectorAll(".lrItemCheck").forEach((check,i)=>{
+   check.addEventListener("change",()=>{
+     document.querySelector(`.lrAmount[data-for="${i}"]`).disabled=!check.checked;
+     document.querySelector(`.lrColor[data-for="${i}"]`).disabled=!check.checked;
+   });
+ });
+ document.getElementById("lrOtherCheck").addEventListener("change",()=>{
+   const on=document.getElementById("lrOtherCheck").checked;
+   ["lrOtherItem","lrOtherAmount","lrOtherColor","lrOtherReusable"].forEach(id=>document.getElementById(id).disabled=!on);
+ });
+}
+function saveLogisticsRequest(){
+ const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
+ let committeeId=state.role==="president"?(document.getElementById("lrCommittee")?.value||""):(mine?.committee||"");
+ if(!committeeId)return alert("Please select a committee.");
+ if(!["chair","president"].includes(state.role))return alert("You do not have permission to submit a committee logistics request.");
+ if(!document.getElementById("lrAgree").checked)return alert("You must accept the materials receipt and return terms.");
+ const requests=[];
+ document.querySelectorAll(".lrItemCheck:checked").forEach((check,i)=>{
+   const amount=Number(document.querySelector(`.lrAmount[data-for="${i}"]`).value);
+   const color=document.querySelector(`.lrColor[data-for="${i}"]`).value.trim();
+   if(!amount||amount<1) return;
+   requests.push({item:check.dataset.item,amount,color,reusable:check.dataset.reusable==="true"});
+ });
+ if(document.getElementById("lrOtherCheck").checked){
+   const item=document.getElementById("lrOtherItem").value.trim();
+   const amount=Number(document.getElementById("lrOtherAmount").value);
+   const color=document.getElementById("lrOtherColor").value.trim();
+   const reusable=document.getElementById("lrOtherReusable").checked;
+   if(!item||!amount||amount<1)return alert("Complete the Other item name and amount.");
+   requests.push({item,amount,color,reusable});
+ }
+ if(!requests.length)return alert("Select at least one material.");
+ state.data.logisticsRequests=state.data.logisticsRequests||[];
+ state.data.notifications=state.data.notifications||[];
+ const now=Date.now();
+ const groupId=uid();
+ requests.forEach(r=>{
+   const req={id:uid(),groupId,committee:committeeId,item:r.item,amount:r.amount,color:r.color,reusable:r.reusable,status:"Pending",requestedBy:window.roles[state.role]?.name||"Committee Dais",requestedByRole:state.role,createdAt:now};
+   state.data.logisticsRequests.push(req);
+ });
+ state.data.notifications.push({
+   id:uid(),type:"logistics",groupId,committee:committeeId,
+   message:`New supply request: ${requests.map(r=>`${r.amount} × ${r.item}${r.color?" · "+r.color:""}`).join(", ")}`,
+   createdAt:now,read:false
+ });
+ save();closeModal();go("logisticsRequests");
+ alert("Your committee's logistics request has been sent to the Head of Logistics.");
+}
+function markAllLogisticsRead(){if(state.role!=="logistics")return;(state.data.notifications||[]).forEach(n=>{if(n.type==="logistics")n.read=true});save();render()}
+function fulfillLogisticsRequest(id){if(state.role!=="logistics")return;const r=(state.data.logisticsRequests||[]).find(x=>x.id===id);if(!r)return;r.status=r.status==="Fulfilled"?"Pending":"Fulfilled";r.fulfilledAt=r.status==="Fulfilled"?Date.now():null;save();render()}
+function rotateCommitteePassword(id){const c=committee(id);if(!c)return;if(!confirm("Generate a new private grading password for this committee?"))return;c.gradingPassword=generateCommitteePassword();save();openCommitteePanel(id)}
+function goToGrading(id){closeModal();state.gradingCommittee=id;go("grading")}
+function setScreenCommittee(id){state.data.screen.committeeId=id;state.data.screen.updated=Date.now();save();closeModal();go("screen")}
+function enterGrading(){const id=document.getElementById("gradeCom").value,pass=document.getElementById("gradePass").value.trim();const c=committee(id);if(!c)return alert("Select a committee.");if(pass!==c.gradingPassword)return alert("Incorrect committee grading password.");state.gradingCommittee=id;render()}
+function gradingRoom(){const c=committee(state.gradingCommittee);if(!c){state.gradingCommittee="";return ""}const ds=state.data.delegates.filter(d=>d.committee===c.id);return `<div class="grading-summary"><div><span class="eyebrow">${esc(c.name)} GRADING ROOM</span><h3>${esc(c.fullName||c.name)}</h3><p>Access granted with the committee-specific password.</p></div><button class="secondary" onclick="state.gradingCommittee='';render()">Exit grading</button></div><div class="panel table-panel"><table><thead><tr><th>Delegate</th><th>Country</th><th>Score / 100</th><th>Notes</th><th></th></tr></thead><tbody>${ds.map(d=>{const g=state.data.grades.find(x=>x.delegate===d.id&&x.committee===c.id)||{score:"",notes:""};return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(state.data.countries.find(x=>x.id===d.country)?.name||"")}</td><td><input class="grade-input" id="score-${d.id}" type="number" min="0" max="100" value="${esc(g.score)}"></td><td><input class="grade-input" id="note-${d.id}" value="${esc(g.notes)}" placeholder="Chair notes"></td><td><button class="row-btn" onclick="saveGrade('${c.id}','${d.id}')">Save</button>${state.role==='logistics'?` <button class="row-btn danger" onclick="deleteGrade('${c.id}','${d.id}')">Delete</button>`:""}</td></tr>`}).join("")}</tbody></table>${!ds.length?empty("No delegates","Assign delegates to this committee first."):""}</div>`}
+function deleteGrade(cid,did){if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.delegate===did&&g.committee===cid));save();render()}
+function saveGrade(cid,did){const score=Number(document.getElementById(`score-${did}`).value);if(Number.isNaN(score)||score<0||score>100)return alert("Score must be between 0 and 100.");const notes=document.getElementById(`note-${did}`).value.trim();const i=state.data.grades.findIndex(g=>g.delegate===did&&g.committee===cid);const obj={delegate:did,committee:cid,score,notes,updated:Date.now()};i>=0?state.data.grades[i]=obj:state.data.grades.push(obj);save();alert("Grade saved.")}
+function populateDelegateSubmitters(){const com=document.getElementById("dpCom"),main=document.getElementById("dpMain"),co=document.getElementById("dpCo");if(!com||!main||!co)return;const ds=state.data.delegates.filter(d=>d.committee===com.value);const opts=ds.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");main.innerHTML=opts;co.innerHTML=opts;main.onchange=()=>{const selected=new Set([...main.selectedOptions].map(o=>o.value));[...co.options].forEach(o=>o.disabled=selected.has(o.value));}}
+function showSelectedFile(input){const f=input.files?.[0],box=document.getElementById("dpFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>20*1024*1024){box.textContent="File is too large. Maximum size is 20 MB.";input.value="";}}
+async function submitDelegateResolution(){const title=document.getElementById("dpTitle").value.trim(),committeeId=document.getElementById("dpCom").value,main=selectedValues("dpMain"),co=selectedValues("dpCo"),file=document.getElementById("dpFile").files?.[0];if(!title||!committeeId||!main.length||!file)return alert("Title, committee, at least one main submitter and a resolution file are required.");if(file.size>20*1024*1024)return alert("The resolution file must be 20 MB or smaller.");const allowed=["application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"];const ext=file.name.toLowerCase().split(".").pop();if(!allowed.includes(file.type)&&!["pdf","doc","docx"].includes(ext))return alert("Please upload a PDF, DOC or DOCX file.");const id=uid();try{const filePath=await storeResolutionFile(id,file);const obj={id,title,committee:committeeId,main:main.map(x=>state.data.delegates.find(d=>d.id===x)?.name).filter(Boolean),co:co.map(x=>state.data.delegates.find(d=>d.id===x)?.name).filter(Boolean),fileName:file.name,fileType:file.type,fileSize:file.size,filePath:filePath,status:"Submitted to SG",submittedAt:Date.now()};state.data.resolutions.push(obj);save();alert("Resolution paper uploaded and submitted to the Secretary-General and chairing panel.");go("myResolutions")}catch(e){console.error(e);alert("The file could not be uploaded to shared storage.\n\n"+(e?.message||e));}}
+function openResolution(id=""){const r=state.data.resolutions.find(x=>x.id===id)||{};const ds=state.data.delegates.filter(x=>x.committee===r.committee);const mainNames=r.main||[],coNames=r.co||[];const mainOpts=ds.map(d=>`<option value="${esc(d.name)}" ${mainNames.includes(d.name)?"selected":""}>${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");const coOpts=ds.map(d=>`<option value="${esc(d.name)}" ${coNames.includes(d.name)?"selected":""}>${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");const attachment=r.fileName?`<div class="file-info"><strong>Uploaded paper:</strong> <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button> · ${(r.fileSize/1024/1024).toFixed(2)} MB</div>`:"";modal(id?"Review resolution paper":"Submit resolution paper",`${formField("Title","rTitle",`value="${esc(r.title||"")}"`)}${selectField("Committee","rCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${r.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="rMain" class="form-input" multiple size="4">${mainOpts}</select><label class="form-label">Co-submitters</label><select id="rCo" class="form-input" multiple size="5">${coOpts}</select>${attachment}<label class="form-label">Resolution text / clauses (optional when a file is uploaded)</label><textarea id="rClauses" class="form-input" rows="7" placeholder="Optional text copy">${esc(r.clauses||"")}</textarea><div class="settings-actions"><button class="primary" onclick="saveResolution('${id}')">${id?"Update paper":"Submit paper"}</button>${id?`<button class="secondary" onclick="approveResolution('${id}')">Approve / send to chair</button><button class="secondary" onclick="setResolutionScreen('${id}')">Send to chairing screen</button>`:""}</div>`)}
+function selectedValues(id){return [...document.getElementById(id).selectedOptions].map(o=>o.value)}
+function saveResolution(id){const title=document.getElementById("rTitle").value.trim(),committeeId=document.getElementById("rCom").value,main=selectedValues("rMain"),co=selectedValues("rCo"),clauses=document.getElementById("rClauses").value.trim();const existing=state.data.resolutions.find(r=>r.id===id)||{};if(!title||!committeeId||!main.length||(!clauses&&!existing.fileName))return alert("Title, committee, at least one main submitter and a resolution paper are required.");const obj={...existing,id:id||uid(),title,committee:committeeId,main,co,clauses,status:id?(existing.status||"Submitted") :"Submitted",submittedAt:existing.submittedAt||Date.now()};const i=state.data.resolutions.findIndex(r=>r.id===id);i>=0?state.data.resolutions[i]=obj:state.data.resolutions.push(obj);save();closeModal();render()}
+function approveResolution(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return;r.status="Approved by SG";save();closeModal();render()}
+function setResolutionScreen(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return;state.data.screen={committeeId:r.committee,speaker:"Resolution Paper",topic:r.title,mode:"Resolution for review",timer:"",resolutionId:r.id,updated:Date.now()};r.status="On chairing screen";save();closeModal();go("screen")}
+function screenPage(){const s=state.data.screen,c=committee(s.committeeId),r=state.data.resolutions.find(x=>x.id===s.resolutionId);const total=Number(s.timerSeconds)||0;const mins=Math.floor(total/60),secs=total%60;return `<div class="live-header"><div><span class="live-kicker">CHAIRING PANEL DISPLAY</span><h3>${esc(c?.name||"No committee selected")}</h3></div><div class="updated">Live local display · updates automatically</div></div><div class="live-grid"><div class="live-card"><div class="live-card-head"><strong>Current item</strong><span class="status in-session">LIVE</span></div><div class="speaker-card"><div class="big-timer" id="chairLiveTimer">${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}</div><strong>${esc(s.speaker||"Awaiting chair input")}</strong><span>${esc(s.topic||"No topic set")}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Committee</strong></div><div class="live-mode">${esc(c?.fullName||"Select a committee")}</div><div class="timer">${esc(c?.room||"—")}</div><div class="live-meta"><span>President / Deputy / Chair</span><span>${c?state.data.staff.filter(x=>x.committee===c.id&&["President","Deputy President","Chair"].includes(x.role)).length+" / 3":"—"}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Resolution on display</strong></div><div class="live-mode">${r?esc(r.title):"None"}</div><div class="timer">${r?esc(r.status):"—"}</div><div class="live-meta"><span>Main</span><span>${r?(r.main||[]).length:"0"}</span></div></div></div><div class="panel"><div class="panel-head"><div><h3>Chair controls</h3><p>Enter the speaker and topic, then control the timer with numeric minute/second fields and buttons.</p></div></div><div class="modal-body">${selectField("Committee","screenCom",`<option value="">Select committee</option>`+state.data.committees.map(x=>`<option value="${x.id}" ${s.committeeId===x.id?"selected":""}>${esc(x.name)}</option>`).join(""))}${formField("Speaker / item","screenSpeaker",`type="text" value="${esc(s.speaker||"")}" autocomplete="off"`)}${formField("Topic","screenTopic",`type="text" value="${esc(s.topic||"")}" autocomplete="off"`)}${selectField("Motion / caucus type","screenMode",`<option value="">Select type</option><option value="Moderated Caucus" ${s.mode==="Moderated Caucus"?"selected":""}>Moderated Caucus</option><option value="Unmoderated Caucus" ${s.mode==="Unmoderated Caucus"?"selected":""}>Unmoderated Caucus</option><option value="General Speakers List" ${s.mode==="General Speakers List"?"selected":""}>General Speakers List</option><option value="Voting" ${s.mode==="Voting"?"selected":""}>Voting</option><option value="Other" ${s.mode==="Other"?"selected":""}>Other</option>`)}${formField("Current motion","screenMotion",`type="text" value="${esc(s.motion||"")}" placeholder="e.g. Motion for a 10-minute moderated caucus" autocomplete="off"`)}<div class="timer-input-grid"><div><label class="form-label">Minutes</label><input id="screenMinutes" class="form-input" type="number" min="0" max="999" step="1" value="${mins}"></div><div><label class="form-label">Seconds</label><input id="screenSeconds" class="form-input" type="number" min="0" max="59" step="1" value="${secs}"></div></div><div class="settings-actions timer-actions"><button class="primary" type="button" onclick="startScreenTimer()">Start</button><button class="secondary" type="button" onclick="pauseScreenTimer()">Pause</button><button class="secondary" type="button" onclick="resetScreenTimer()">Reset</button><button class="secondary" type="button" onclick="setScreenTimerFromFields()">Set timer</button></div><button class="primary full" onclick="updateScreen()">Update connected screen</button><button class="secondary full" onclick="openScreenWindow()">Open projector / screen window</button>${r?`<div class="panel" style="margin-top:18px"><div class="panel-head"><div><h3>${esc(r.title)}</h3><p>${esc(r.status)}</p></div></div><div class="modal-body"><p class="muted">${esc(r.clauses)}</p><p><strong>Main submitters:</strong> ${(r.main||[]).map(esc).join(", ")||"—"}</p><p><strong>Co-submitters:</strong> ${(r.co||[]).map(esc).join(", ")||"—"}</p></div></div>`:""}</div></div>`}
+function readTimerFields(){let m=Math.max(0,Math.min(999,parseInt(document.getElementById("screenMinutes")?.value,10)||0));let s=Math.max(0,Math.min(59,parseInt(document.getElementById("screenSeconds")?.value,10)||0));return m*60+s}
+function setScreenTimerFromFields(){state.data.screen.timerSeconds=readTimerFields();state.data.screen.timerRunning=false;state.data.screen.updated=Date.now();save();render()}
+function startScreenTimer(){state.data.screen.timerSeconds=readTimerFields();state.data.screen.timerRunning=true;state.data.screen.updated=Date.now();save();render()}
+function pauseScreenTimer(){state.data.screen.timerRunning=false;state.data.screen.updated=Date.now();save();render()}
+function resetScreenTimer(){state.data.screen.timerRunning=false;state.data.screen.timerSeconds=0;state.data.screen.updated=Date.now();save();render()}
+function updateScreen(){const sec=readTimerFields();state.data.screen={...state.data.screen,committeeId:document.getElementById("screenCom").value,speaker:document.getElementById("screenSpeaker").value.trim(),topic:document.getElementById("screenTopic").value.trim(),mode:document.getElementById("screenMode").value,motion:document.getElementById("screenMotion").value.trim(),timerSeconds:sec,updated:Date.now()};save();render()}
+function filterCards(q,id){q=q.toLowerCase();document.querySelectorAll(`#${id} .resource-card`).forEach(c=>c.style.display=c.textContent.toLowerCase().includes(q)?"":"none")}
+function openResource(){modal("Upload conference resource",`${formField("Title","resTitle",`placeholder="e.g. UNODC Background Guide"`)}${selectField("Committee (optional)","resCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Description</label><textarea id="resDesc" class="form-input" rows="4" placeholder="What is this file for?"></textarea><label class="form-label">File</label><input id="resFile" class="form-input" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx" onchange="showResourceFile(this)"><div id="resFileInfo" class="muted" style="margin-top:7px">PDF, DOC, DOCX, PPT or PPTX · maximum 30 MB</div><button class="primary full" onclick="saveResource()">Upload resource</button>`)}
+function showResourceFile(input){const f=input.files?.[0],box=document.getElementById("resFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>30*1024*1024){box.textContent="File is too large. Maximum size is 30 MB.";input.value=""}}
+async function saveResource(){const title=document.getElementById("resTitle").value.trim(),committeeId=document.getElementById("resCom").value,description=document.getElementById("resDesc").value.trim(),file=document.getElementById("resFile").files?.[0];if(!title||!file)return alert("Title and file are required.");if(file.size>30*1024*1024)return alert("The resource must be 30 MB or smaller.");const ext=file.name.toLowerCase().split(".").pop();if(!["pdf","doc","docx","ppt","pptx"].includes(ext))return alert("Please upload a PDF, DOC, DOCX, PPT or PPTX file.");const id=uid();try{const filePath=await storeResourceFile(id,file);state.data.resources=state.data.resources||[];state.data.resources.push({id,title,committee:committeeId,description,fileName:file.name,fileType:file.type,fileSize:file.size,filePath:filePath,uploadedBy:state.role,uploadedAt:Date.now()});save();closeModal();render();alert("Resource uploaded successfully.")}catch(e){console.error(e);alert("The resource could not be uploaded to shared storage.\n\n"+(e?.message||e));}}
+async function removeResource(id){
+  if(!isStaff()||!confirm("Remove this resource?"))return;
+  const r=(state.data.resources||[]).find(x=>x.id===id);
+  if(r?.filePath && await ensureRemoteReady()) await supabaseClient.storage.from("conference-files").remove([r.filePath]);
+  state.data.resources=(state.data.resources||[]).filter(x=>x.id!==id);
+  save();render();
+}
+function removeRecord(type,id){if(!confirm("Delete this record?"))return;state.data[type]=state.data[type].filter(x=>x.id!==id);if(type==="committees"){state.data.countries.forEach(c=>c.committees=(c.committees||[]).filter(x=>x!==id));state.data.staff=state.data.staff.filter(s=>s.committee!==id||["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"].includes(s.role));state.data.delegates=state.data.delegates.filter(d=>d.committee!==id);state.data.resolutions=state.data.resolutions.filter(r=>r.committee!==id);state.data.grades=state.data.grades.filter(g=>g.committee!==id)}if(type==="countries")state.data.delegates=state.data.delegates.filter(d=>d.country!==id);save();render()}
+function exportData(){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(state.data,null,2)],{type:"application/json"}));a.download="hhhsmUN-backup.json";a.click();URL.revokeObjectURL(a.href)}
+function importData(file){if(!file)return;const r=new FileReader();r.onload=()=>{try{state.data={...defaults,...JSON.parse(r.result)};save();render();alert("Backup imported.")}catch{alert("Invalid backup file.")}};r.readAsText(file)}
+function clearData(){if(confirm("Clear all conference data saved in this browser?")){state.data=structuredClone(defaults);save();state.gradingCommittee="";render()}}
+// Delegate portal: accessible from the delegate side when the role is later connected to real accounts.
+
+function openDelegateResolution(){openResolution()}
+// Keep the local chairing display fresh when a second tab is used as the screen.
+function openScreenWindow(){window.open(location.href.split("?")[0]+"?screen=1","hhhsmUNScreen","width=1400,height=900")}
+function renderScreenOnly(){document.body.innerHTML=`<div id="screenOnly" class="screen-only"></div>`;updateScreenOnly();setInterval(updateScreenOnly,1000)}
+async function updateScreenOnly(){let d=loadData();try{const {data}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();if(data?.data)d=data.data;}catch(e){}const s=d.screen||{},c=(d.committees||[]).find(x=>x.id===s.committeeId),r=(d.resolutions||[]).find(x=>x.id===s.resolutionId);let t=Math.max(0,Number(s.timerSeconds)||0);if(s.timerRunning&&s.updated)t=Math.max(0,t-Math.floor((Date.now()-Number(s.updated))/1000));const mm=Math.floor(t/60),ss=t%60;document.getElementById("screenOnly").innerHTML=`<div class="screen-brand"><img src="hhhsmu-logo.png" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(c?.name||"HHHSMUN")}</div><div class="screen-item">${esc(s.speaker||"Awaiting chair input")}</div><div class="screen-topic">${esc(s.topic||c?.fullName||"Awaiting committee activity")}</div>${s.motion?`<div class="screen-motion"><span>CURRENT MOTION</span><strong>${esc(s.motion)}</strong></div>`:""}<div class="screen-timer">${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}</div>${r?`<div class="screen-resolution"><strong>${esc(r.title)}</strong><span>${esc(r.status)}</span></div>`:""}</div>`}
+if(new URLSearchParams(location.search).get("screen")==="1"){renderScreenOnly()}
+setInterval(()=>{if(state.data?.screen?.timerRunning){if((Number(state.data.screen.timerSeconds)||0)>0){state.data.screen.timerSeconds--;state.data.screen.updated=Date.now();saveLocalOnly();if(remoteReady&&Date.now()-lastRemoteTimerSync>3000){lastRemoteTimerSync=Date.now();pushRemoteState()}}else{state.data.screen.timerRunning=false;state.data.screen.updated=Date.now();save();}}},1000);
+// Do not re-render the Chairing Panel every second: doing so destroys focus,
+// closes open selects, and interrupts typing. Only refresh the visible live timer text.
+setInterval(()=>{
+  if(state.role&&state.page==="screen"){
+    const live=document.getElementById("chairLiveTimer");
+    if(live){
+      const d=loadData(),t=Math.max(0,Number(d.screen?.timerSeconds)||0);
+      live.textContent=String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");
+    }
+  }
+},1000);
+</script>
+</body>
+</html>
