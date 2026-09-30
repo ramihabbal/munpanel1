@@ -168,10 +168,10 @@ function startRemoteSync(){
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
         const incoming=payload?.new?.data;
         if(!incoming || localDirty)return;
-        state.data={...structuredClone(defaults),...incoming};
+        state.data=applyGradeDrafts({...structuredClone(defaults),...incoming});
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
-        if(state.role && !(state.page==="grading" && state.gradingCommittee)) render();
+        if(state.role) render();
       }).subscribe();
   }catch(e){console.warn("Realtime subscription unavailable; polling will be used.",e)}
   setInterval(async()=>{
@@ -183,7 +183,7 @@ function startRemoteSync(){
         state.data={...structuredClone(defaults),...data.data};
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
-        if(state.role && !(state.page==="grading" && state.gradingCommittee)) render();
+        if(state.role) render();
       }
     }catch(e){console.warn("Remote sync poll failed",e)}
   },5000);
@@ -717,16 +717,11 @@ function criterionKey(ci,ri){return `${ci}_${ri}`}
 function criterionValue(g,ci,ri,name){const key=criterionKey(ci,ri);if(g?.criteria&&Object.prototype.hasOwnProperty.call(g.criteria,key))return g.criteria[key];return g?.criteria?.[name]??""}
 function hGrade(cid,country){return state.data.grades.find(g=>g.committee===cid&&g.country===country&&g.rubricLanguage===hhhLanguage)||{}}
 function hTotal(g){return hRubric().reduce((s,c,ci)=>s+c.criteria.reduce((x,[n,m],ri)=>x+Math.max(0,Math.min(m,Number(criterionValue(g,ci,ri,n))||0)),0),0)}
-let openGradeCountries=new Set();
-let dirtyGradeCountries=new Set();
-function setGradeCountryOpen(countryId,isOpen){if(isOpen)openGradeCountries.add(countryId);else openGradeCountries.delete(countryId)}
-function markGradeDirty(countryId){dirtyGradeCountries.add(countryId);localDirty=true;}
-function updateCountryGradeTotal(countryId){let t=0;hRubric().forEach((c,ci)=>c.criteria.forEach(([n,m],ri)=>{const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);t+=Math.max(0,Math.min(m,Number(e?.value)||0))}));const o=document.getElementById(`gt_${hId(countryId)}`);if(o)o.textContent=`${t}/100`;markGradeDirty(countryId)}
+let openGradeCountries=new Set(); function setGradeCountryOpen(countryId,isOpen){if(isOpen)openGradeCountries.add(countryId);else openGradeCountries.delete(countryId)} function updateCountryGradeTotal(countryId){let t=0;hRubric().forEach((c,ci)=>c.criteria.forEach(([n,m],ri)=>{const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);t+=Math.max(0,Math.min(m,Number(e?.value)||0))}));const o=document.getElementById(`gt_${hId(countryId)}`);if(o)o.textContent=`${t}/100`}
 function filterGradeCountries(q){q=String(q||"").toLowerCase().trim();document.querySelectorAll("#countryGradeList .country-grade-card").forEach(e=>e.style.display=(e.dataset.country+" "+e.dataset.delegate).includes(q)?"":"none")}
-function saveCountryGrade(cid,countryId){if(!canAccessCommitteeGrading(cid))return alert("You do not have access to this committee's grading system.");let criteria={},total=0;for(let ci=0;ci<hRubric().length;ci++){const c=hRubric()[ci];for(let ri=0;ri<c.criteria.length;ri++){const [n,m]=c.criteria[ri];const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`),v=Number(e?.value||0);if(v<0||v>m)return alert(`Score must be between 0 and ${m}.`);criteria[criterionKey(ci,ri)]=v;total+=v;}}
-  const notes=document.getElementById(`gn_${hId(countryId)}`)?.value.trim()||"",i=state.data.grades.findIndex(g=>g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage),obj={id:i>=0?state.data.grades[i].id:uid(),schema:3,committee:cid,country:countryId,rubricLanguage:hhhLanguage,criteria,total,score:total,notes,updated:Date.now()};if(i>=0)state.data.grades[i]=obj;else state.data.grades.push(obj);dirtyGradeCountries.delete(countryId);save();localDirty=false;lastRemoteSnapshot=cloneData(state.data);updateSavedGradeUI(countryId,total);}
-function updateSavedGradeUI(countryId,total){const o=document.getElementById(`gt_${hId(countryId)}`);if(o)o.textContent=`${total}/100`;const card=document.querySelector(`.country-grade-card[data-country-id="${CSS.escape(String(countryId))}"]`);if(card)card.dataset.saved="true";}
-function deleteCountryGrade(cid,countryId){if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this country grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage));save();render()}
+async function saveCountryGrade(cid,countryId){if(!canAccessCommitteeGrading(cid))return alert("You do not have access to this committee's grading system.");let criteria={},total=0;for(let ci=0;ci<hRubric().length;ci++){const c=hRubric()[ci];for(let ri=0;ri<c.criteria.length;ri++){const [n,m]=c.criteria[ri];const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`),v=Number(e?.value||0);if(v<0||v>m)return alert(`Score must be between 0 and ${m}.`);criteria[criterionKey(ci,ri)]=v;total+=v;}}
+  const notes=document.getElementById(`gn_${hId(countryId)}`)?.value.trim()||"",i=state.data.grades.findIndex(g=>g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage),obj={id:i>=0?state.data.grades[i].id:uid(),schema:2,committee:cid,country:countryId,rubricLanguage:hhhLanguage,criteria,total,score:total,notes,updated:Date.now()};if(i>=0)state.data.grades[i]=obj;else state.data.grades.push(obj);saveLocalOnly();localDirty=true;try{await ensureRemoteReady();if(remoteReady){await pushRemoteState();}}catch(e){console.warn("Grade save failed",e);alert("The grade could not be saved to shared storage. Please try Save grade again.");return}render()}
+function deleteCountryGrade(cid,countryId){if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this country grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage));clearGradeDraft(cid,countryId,hhhLanguage);save();render()}
 function gradingRoom(){
   const c=committee(state.gradingCommittee);
   if(!c)return "";
@@ -743,9 +738,9 @@ function gradingRoom(){
         <input id="g_${hId(country.id)}_${criterionKey(ci,ri)}" type="number" min="0" max="${m}" step="0.5" value="${esc(criterionValue(g,ci,ri,n))}" oninput="updateCountryGradeTotal('${country.id}')">
       </label>`).join("")}
     </div>`).join("");
-    const saveText=hhhLanguage==="en"?"Save changes":hhhLanguage==="fr"?"Enregistrer les modifications":"حفظ التغييرات";
+    const saveText=hhhLanguage==="en"?"Save grade":hhhLanguage==="fr"?"Enregistrer la note":"حفظ العلامة";
     const deleteText=hhhLanguage==="en"?"Delete":hhhLanguage==="fr"?"Supprimer":"حذف";
-    return `<details class="country-grade-card" dir="${hhhLanguage==='ar'?'rtl':'ltr'}" data-country-id="${esc(country.id)}" data-country="${esc(country.name.toLowerCase())}" data-delegate="${esc((d?.name||"").toLowerCase())}" ${openGradeCountries.has(country.id)?"open":""} ontoggle="setGradeCountryOpen('${country.id}',this.open)">
+    return `<details class="country-grade-card" dir="${hhhLanguage==='ar'?'rtl':'ltr'}" data-country="${esc(country.name.toLowerCase())}" data-delegate="${esc((d?.name||"").toLowerCase())}" ${openGradeCountries.has(country.id)?"open":""} ontoggle="setGradeCountryOpen('${country.id}',this.open)">
       <summary><div class="country-grade-meta"><strong>${esc(country.name)}</strong>${d?`<span class="muted">${esc(d.name)}</span>`:""}</div><span class="country-grade-total" id="gt_${hId(country.id)}">${hTotal(g)}/100</span></summary>
       <div class="country-grade-body">${cats}<div class="grade-note"><label class="form-label">${hhhLanguage==="ar"?"ملاحظات":hhhLanguage==="fr"?"Remarques":"Notes"}</label><textarea id="gn_${hId(country.id)}" class="form-input" rows="3">${esc(g.notes||"")}</textarea></div><div class="grade-card-actions"><button class="primary" onclick="saveCountryGrade('${c.id}','${country.id}')">${saveText}</button>${state.role==="logistics"&&g.id?`<button class="row-btn danger" onclick="deleteCountryGrade('${c.id}','${country.id}')">${deleteText}</button>`:""}</div></div>
     </details>`;
