@@ -143,7 +143,7 @@ function renderRemoteStatus(){
 }
 function saveLocalOnly(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state.data))}catch(e){}}
 async function pushRemoteState(){
-  if(!remoteReady)return false;
+  if(!remoteReady)return;
   try{
     const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
     if(error)throw error;
@@ -155,11 +155,7 @@ async function pushRemoteState(){
     lastRemoteSnapshot=cloneData(state.data);
     localDirty=false;
     saveLocalOnly();
-    return true;
-  }catch(e){
-    console.warn("Remote save failed",e);
-    return false;
-  }
+  }catch(e){console.warn("Remote save failed",e)}
 }
 function scheduleRemoteSave(){
   localDirty=true;
@@ -172,8 +168,7 @@ function startRemoteSync(){
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
         const incoming=payload?.new?.data;
         if(!incoming || localDirty)return;
-        if(state.page==="grading" && state.gradingCommittee)return;
-        state.data={...structuredClone(defaults),...incoming};
+        state.data=applyGradeDrafts({...structuredClone(defaults),...incoming});
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
         if(state.role) render();
@@ -181,7 +176,6 @@ function startRemoteSync(){
   }catch(e){console.warn("Realtime subscription unavailable; polling will be used.",e)}
   setInterval(async()=>{
     if(!remoteReady || localDirty)return;
-    if(state.page==="grading" && state.gradingCommittee)return;
     try{
       const {data,error}=await supabaseClient.from("conference_state").select("data,updated_at").eq("id","main").maybeSingle();
       if(error||!data?.data)return;
@@ -260,10 +254,13 @@ async function downloadStorageFile(path,name){
 async function downloadResolutionFile(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return alert("Resolution paper not found.");await downloadStorageFile(r.filePath,r.fileName);}
 async function downloadResourceFile(id){const r=(state.data.resources||[]).find(x=>x.id===id);if(!r)return alert("Resource not found.");await downloadStorageFile(r.filePath,r.fileName);}
 
-function login(){
+async function login(){
  const type=document.getElementById("accountType").value,pass=document.getElementById("password").value;
  if(pass!==loginPasswords[type]){document.getElementById("loginError").textContent="Incorrect password.";return}
- state.role=type;state.page=window.roles[type].pages[0][0];document.getElementById("loginError").textContent="";document.getElementById("loginView").classList.add("hidden");document.getElementById("appView").classList.remove("hidden");renderShell();render();if(state.page==="delegatePortal")populateDelegateSubmitters();
+ state.role=type;state.page=window.roles[type].pages[0][0];state.gradingCommittee="";document.getElementById("loginError").textContent="";document.getElementById("loginView").classList.add("hidden");document.getElementById("appView").classList.remove("hidden");
+ // Load the shared conference state before rendering pages that depend on committees.
+ await pullRemoteState();
+ renderShell();render();if(state.page==="delegatePortal")populateDelegateSubmitters();
 }
 function logout(){state.role=null;document.getElementById("appView").classList.add("hidden");document.getElementById("loginView").classList.remove("hidden");document.getElementById("password").value=""}
 function renderShell(){const r=window.roles[state.role];document.getElementById("roleChip").textContent=r.label;document.getElementById("userName").textContent=r.name;document.getElementById("avatar").textContent=r.avatar;document.getElementById("nav").innerHTML=r.pages.map(p=>`<button class="nav-item ${state.page===p[0]?'active':''}" onclick="go('${p[0]}')"><span>${icon(p[0])}</span>${p[1]}</button>`).join("")}
@@ -723,80 +720,11 @@ function criterionKey(ci,ri){return `${ci}_${ri}`}
 function criterionValue(g,ci,ri,name){const key=criterionKey(ci,ri);if(g?.criteria&&Object.prototype.hasOwnProperty.call(g.criteria,key))return g.criteria[key];return g?.criteria?.[name]??""}
 function hGrade(cid,country){return state.data.grades.find(g=>g.committee===cid&&g.country===country&&g.rubricLanguage===hhhLanguage)||{}}
 function hTotal(g){return hRubric().reduce((s,c,ci)=>s+c.criteria.reduce((x,[n,m],ri)=>x+Math.max(0,Math.min(m,Number(criterionValue(g,ci,ri,n))||0)),0),0)}
-let openGradeCountries=new Set();
-function setGradeCountryOpen(countryId,isOpen){
-  if(isOpen)openGradeCountries.add(countryId);
-  else openGradeCountries.delete(countryId);
-}
-function updateCountryGradeTotal(countryId){
-  let t=0;
-  hRubric().forEach((c,ci)=>c.criteria.forEach(([n,m],ri)=>{
-    const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);
-    t+=Math.max(0,Math.min(m,Number(e?.value)||0));
-  }));
-  const o=document.getElementById(`gt_${hId(countryId)}`);
-  if(o)o.textContent=`${t}/100`;
-}
-function filterGradeCountries(q){
-  q=String(q||"").toLowerCase().trim();
-  document.querySelectorAll("#countryGradeList .country-grade-card").forEach(e=>e.style.display=(e.dataset.country+" "+e.dataset.delegate).includes(q)?"":"none");
-}
-function collectCountryGrade(cid,countryId){
-  let criteria={},total=0;
-  for(let ci=0;ci<hRubric().length;ci++){
-    const c=hRubric()[ci];
-    for(let ri=0;ri<c.criteria.length;ri++){
-      const [n,m]=c.criteria[ri];
-      const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);
-      const v=Number(e?.value||0);
-      if(v<0||v>m)return {error:`Score must be between 0 and ${m}.`};
-      criteria[criterionKey(ci,ri)]=v;
-      total+=v;
-    }
-  }
-  const notes=document.getElementById(`gn_${hId(countryId)}`)?.value.trim()||"";
-  const i=state.data.grades.findIndex(g=>g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage);
-  return {grade:{id:i>=0?state.data.grades[i].id:uid(),schema:2,committee:cid,country:countryId,rubricLanguage:hhhLanguage,criteria,total,score:total,notes,updated:Date.now()},index:i};
-}
-async function commitGrades(cid,countryIds){
-  if(!canAccessCommitteeGrading(cid))return false;
-  const updates=[];
-  for(const countryId of countryIds){
-    const result=collectCountryGrade(cid,countryId);
-    if(result.error){alert(result.error);return false;}
-    updates.push(result);
-  }
-  updates.forEach(({grade,index})=>{
-    if(index>=0)state.data.grades[index]=grade;
-    else state.data.grades.push(grade);
-  });
-  localDirty=true;
-  if(!(await ensureRemoteReady()))return false;
-  const saved=await pushRemoteState();
-  if(!saved){
-    alert("The grade could not be saved to shared storage. Please try again.");
-    return false;
-  }
-  return true;
-}
-async function saveCountryGrade(cid,countryId){
-  if(!(await commitGrades(cid,[countryId])))return;
-  render();
-}
-async function saveAllGrades(cid){
-  if(!canAccessCommitteeGrading(cid))return alert("You do not have access to this committee's grading system.");
-  const countries=[...state.data.countries].filter(x=>(x.committees||[]).includes(cid));
-  if(!countries.length)return alert("There are no countries to save.");
-  if(!(await commitGrades(cid,countries.map(x=>x.id))))return;
-  render();
-}
-function deleteCountryGrade(cid,countryId){
-  if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");
-  if(!confirm("Delete this country grade?"))return;
-  state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage));
-  save();
-  render();
-}
+let openGradeCountries=new Set(); function setGradeCountryOpen(countryId,isOpen){if(isOpen)openGradeCountries.add(countryId);else openGradeCountries.delete(countryId)} function updateCountryGradeTotal(countryId){let t=0;hRubric().forEach((c,ci)=>c.criteria.forEach(([n,m],ri)=>{const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);t+=Math.max(0,Math.min(m,Number(e?.value)||0))}));const o=document.getElementById(`gt_${hId(countryId)}`);if(o)o.textContent=`${t}/100`}
+function filterGradeCountries(q){q=String(q||"").toLowerCase().trim();document.querySelectorAll("#countryGradeList .country-grade-card").forEach(e=>e.style.display=(e.dataset.country+" "+e.dataset.delegate).includes(q)?"":"none")}
+async function saveCountryGrade(cid,countryId){if(!canAccessCommitteeGrading(cid))return alert("You do not have access to this committee's grading system.");let criteria={},total=0;for(let ci=0;ci<hRubric().length;ci++){const c=hRubric()[ci];for(let ri=0;ri<c.criteria.length;ri++){const [n,m]=c.criteria[ri];const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`),v=Number(e?.value||0);if(v<0||v>m)return alert(`Score must be between 0 and ${m}.`);criteria[criterionKey(ci,ri)]=v;total+=v;}}
+  const notes=document.getElementById(`gn_${hId(countryId)}`)?.value.trim()||"",i=state.data.grades.findIndex(g=>g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage),obj={id:i>=0?state.data.grades[i].id:uid(),schema:2,committee:cid,country:countryId,rubricLanguage:hhhLanguage,criteria,total,score:total,notes,updated:Date.now()};if(i>=0)state.data.grades[i]=obj;else state.data.grades.push(obj);saveLocalOnly();localDirty=true;try{await ensureRemoteReady();if(remoteReady){await pushRemoteState();}}catch(e){console.warn("Grade save failed",e);alert("The grade could not be saved to shared storage. Please try Save grade again.");return}render()}
+function deleteCountryGrade(cid,countryId){if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this country grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId&&g.rubricLanguage===hhhLanguage));clearGradeDraft(cid,countryId,hhhLanguage);save();render()}
 function gradingRoom(){
   const c=committee(state.gradingCommittee);
   if(!c)return "";
@@ -825,7 +753,7 @@ function gradingRoom(){
   const exit=hhhLanguage==="en"?"Exit grading":hhhLanguage==="fr"?"Quitter l’évaluation":"الخروج من التقييم";
   const countLabel=hhhLanguage==="en"?"countries":hhhLanguage==="fr"?"pays":"دولة";
   const emptyText=hhhLanguage==="en"?"Assign countries to this committee first.":hhhLanguage==="fr"?"Ajoutez d’abord des pays à ce comité.":"يرجى إضافة الدول إلى هذه اللجنة أولًا.";
-  return `<div class="grading-room" dir="${hhhLanguage==='ar'?'rtl':'ltr'}"><div class="grading-summary"><div><span class="eyebrow">${esc(c.name)} GRADING ROOM</span><h3>${esc(c.fullName||c.name)}</h3><p>${desc}</p></div><button class="secondary" onclick="state.gradingCommittee='';render()">${exit}</button></div><div class="grading-tools"><div class="search">⌕ <input oninput="filterGradeCountries(this.value)" placeholder="${ph}"></div><span class="status in-session">${countries.length} ${countLabel}</span><button class="primary" onclick="saveAllGrades('${c.id}')">${hhhLanguage==="en"?"Save all":hhhLanguage==="fr"?"Tout enregistrer":"حفظ الكل"}</button></div><div id="countryGradeList" class="country-grade-list">${cards||`<div class="empty"><strong>${hhhLanguage==="ar"?"لا توجد دول":hhhLanguage==="fr"?"Aucun pays":"No countries"}</strong><p>${emptyText}</p></div>`}</div></div>`;
+  return `<div class="grading-room" dir="${hhhLanguage==='ar'?'rtl':'ltr'}"><div class="grading-summary"><div><span class="eyebrow">${esc(c.name)} GRADING ROOM</span><h3>${esc(c.fullName||c.name)}</h3><p>${desc}</p></div><button class="secondary" onclick="state.gradingCommittee='';render()">${exit}</button></div><div class="grading-tools"><div class="search">⌕ <input oninput="filterGradeCountries(this.value)" placeholder="${ph}"></div><span class="status in-session">${countries.length} ${countLabel}</span></div><div id="countryGradeList" class="country-grade-list">${cards||`<div class="empty"><strong>${hhhLanguage==="ar"?"لا توجد دول":hhhLanguage==="fr"?"Aucun pays":"No countries"}</strong><p>${emptyText}</p></div>`}</div></div>`;
 }
 function enterGrading(){const id=document.getElementById("gradeCom")?.value,pass=document.getElementById("gradePass")?.value.trim()||"",c=committee(id);if(!c)return alert("Select a committee.");const unrestricted=["logistics","sg","training","advisory"].includes(state.role);if(unrestricted){state.gradingCommittee=id;render();return}if(!canAccessCommitteeGrading(id))return alert("You do not have access to this committee's grading system.");if(pass!==c.gradingPassword)return alert("Incorrect committee grading password.");state.gradingCommittee=id;render()}
 const _oldGrading=pages.grading;pages.grading=()=>{const allowed=state.data.committees.filter(c=>canAccessCommitteeGrading(c.id)),lab=hhhLanguage==="en"?"Committee":hhhLanguage==="fr"?"Comité":"اللجنة",ph=hhhLanguage==="en"?"Select committee":hhhLanguage==="fr"?"Sélectionner un comité":"اختر اللجنة",pw=hhhLanguage==="en"?"Committee grading password":hhhLanguage==="fr"?"Mot de passe d’évaluation":"كلمة مرور تقييم اللجنة",btn=hhhLanguage==="en"?"Enter grading system":hhhLanguage==="fr"?"Accéder au système d’évaluation":"الدخول إلى نظام التقييم";if(state.gradingCommittee)return gradingRoom();return `<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>${hhhLanguage==="en"?"Enter a committee grading room":hhhLanguage==="fr"?"Accéder à la salle d’évaluation":"الدخول إلى نظام تقييم اللجنة"}</h3><p>${hhhLanguage==="en"?"The selected website language controls the grading rubric.":hhhLanguage==="fr"?"La langue du site contrôle le barème.":"لغة الموقع المختارة تتحكم في نموذج التقييم."}</p></div></div><div class="panel"><div class="modal-body">${selectField(lab,"gradeCom",`<option value="">${ph}</option>`+allowed.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}${["logistics","sg","training","advisory"].includes(state.role)?"":formField(pw,"gradePass",`type="password" placeholder="${pw}"`)}<button class="primary full" onclick="enterGrading()">${btn}</button></div></div>`};
