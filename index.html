@@ -162,20 +162,23 @@ function scheduleRemoteSave(){
   clearTimeout(remoteSaveTimer);
   remoteSaveTimer=setTimeout(pushRemoteState,250);
 }
+function isGradingLocked(){
+  return state.page==="grading";
+}
 function startRemoteSync(){
   try{
     supabaseClient.channel("hhhsmUN-conference-state")
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
         const incoming=payload?.new?.data;
-        if(!incoming || localDirty)return;
-        state.data=applyGradeDrafts({...structuredClone(defaults),...incoming});
+        if(!incoming || localDirty || isGradingLocked())return;
+        state.data={...structuredClone(defaults),...incoming};
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
         if(state.role) render();
       }).subscribe();
   }catch(e){console.warn("Realtime subscription unavailable; polling will be used.",e)}
   setInterval(async()=>{
-    if(!remoteReady || localDirty)return;
+    if(!remoteReady || localDirty || isGradingLocked())return;
     try{
       const {data,error}=await supabaseClient.from("conference_state").select("data,updated_at").eq("id","main").maybeSingle();
       if(error||!data?.data)return;
