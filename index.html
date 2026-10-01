@@ -165,12 +165,16 @@ function scheduleRemoteSave(){
 function isGradingLocked(){
   return state.page==="grading";
 }
+function isUiEditing(){
+  const active=document.activeElement;
+  return !!document.getElementById("modal") || !!active && ["INPUT","TEXTAREA","SELECT"].includes(active.tagName);
+}
 function startRemoteSync(){
   try{
     supabaseClient.channel("hhhsmUN-conference-state")
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
         const incoming=payload?.new?.data;
-        if(!incoming || localDirty || isGradingLocked())return;
+        if(!incoming || localDirty || isGradingLocked() || isUiEditing())return;
         state.data={...structuredClone(defaults),...incoming};
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
@@ -180,7 +184,7 @@ function startRemoteSync(){
       }).subscribe();
   }catch(e){console.warn("Realtime subscription unavailable; polling will be used.",e)}
   setInterval(async()=>{
-    if(!remoteReady || localDirty || isGradingLocked())return;
+    if(!remoteReady || localDirty || isGradingLocked() || isUiEditing())return;
     try{
       const {data,error}=await supabaseClient.from("conference_state").select("data,updated_at").eq("id","main").maybeSingle();
       if(error||!data?.data)return;
@@ -198,7 +202,7 @@ function startRemoteSync(){
 }
 const STORAGE_KEY="hhhsmUN_official_v2";
 const defaults={
-  committees:[],countries:[],staff:[],delegates:[],resolutions:[],resources:[],grades:[],logisticsRequests:[],notifications:[],screen:{committeeId:"",speaker:"",topic:"",mode:"",timer:"",timerSeconds:0,timerRunning:false,updated:0}
+  committees:[],countries:[],staff:[],delegates:[],resolutions:[],resources:[],grades:[],financeEntries:[],logisticsRequests:[],notifications:[],screen:{committeeId:"",speaker:"",topic:"",mode:"",timer:"",timerSeconds:0,timerRunning:false,updated:0}
 };
 const loginPasswords={
   president:"Copper!Lantern27",
@@ -218,7 +222,7 @@ window.roles={
   sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
   logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["settings","Settings"]]},
   finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
-  training:{label:"Head of Training",name:"Head of Training",avatar:"HT",pages:[["overview","Overview"],["training","Training"],["resources","Resources"]]},
+  training:{label:"Head of Training",name:"Head of Training",avatar:"HT",pages:[["overview","Overview"],["training","Training"],["grading","Grading"],["resources","Resources"]]},
   rapporteur:{label:"Head of Rapporteurs",name:"Head of Rapporteurs",avatar:"HR",pages:[["overview","Overview"],["rapporteur","Rapporteurs"],["resources","Resources"]]},
   advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
   chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["overview","Overview"],["mycommittee","My Committee"],["screen","Chairing Screen"],["grading","Grading"],["resolutions","Resolution Papers"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
@@ -226,7 +230,7 @@ window.roles={
 };
 const passWords=["Cedar","Orbit","Maple","Harbor","Quartz","Atlas","Lantern","Signal","Raven","Vector","Summit","Comet","Pine","Marble","Copper","Lunar"];
 function generateCommitteePassword(){const a=passWords[Math.floor(Math.random()*passWords.length)],b=passWords[Math.floor(Math.random()*passWords.length)],n=Math.floor(10+Math.random()*90);return `${a}!${b}${n}`;}
-function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=(d.committees||[]).map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));return d}catch{return structuredClone(defaults)}}
+function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=(d.committees||[]).map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));d.financeEntries=Array.isArray(d.financeEntries)?d.financeEntries:[];return d}catch{return structuredClone(defaults)}}
 const state={role:null,page:"overview",data:loadData(),gradingCommittee:""};
 setTimeout(()=>{pullRemoteState();startRemoteSync()},0);
 function save(){saveLocalOnly();scheduleRemoteSave();}
@@ -341,7 +345,7 @@ const pages={
  mycommittee:()=>{const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name)||state.data.staff.find(s=>s.role==="Chair");return mine?committeePanel(mine.committee):empty("No committee assigned","Your Chair account has not been assigned to a committee yet.")},
   delegatePortal:()=>`<div class="permission-banner"><div><strong>Delegate resolution portal</strong><p>Upload your resolution paper as a PDF or Word document. Select the main submitters and co-submitters. The paper is routed to the Secretary-General and assigned chairing panel.</p></div><span>UPLOAD → SG → CHAIR</span></div><div class="panel"><div class="panel-head"><div><h3>New resolution paper</h3><p>Accepted formats: PDF, DOC, DOCX · Maximum size: 20 MB.</p></div></div><div class="modal-body">${formField("Resolution title","dpTitle",`placeholder="Draft resolution title"`)}${selectField("Committee","dpCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="dpMain" class="form-input" multiple size="5"></select><label class="form-label">Co-submitters</label><select id="dpCo" class="form-input" multiple size="6"></select><label class="form-label">Resolution paper file</label><input id="dpFile" class="form-input file-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="showSelectedFile(this)"><div id="dpFileInfo" class="file-info">No file selected.</div><button class="primary full" onclick="submitDelegateResolution()">Upload and submit to SG and Chairing Panel</button></div></div>`,
   myResolutions:()=>{const mine=state.data.resolutions;return `<div class="panel"><div class="panel-head"><div><h3>My resolution papers</h3><p>Submission status and routing.</p></div></div>${mine.length?mine.map(r=>`<div class="queue"><b>§</b><span><strong>${esc(r.title)}</strong><small>${esc(committee(r.committee)?.name||"")} · ${(r.main||[]).join(", ")}${r.fileName?` · <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">Download ${esc(r.fileName)}</button>`:""}</small></span><span class="award">${esc(r.status)}</span></div>`).join(""):empty("No papers submitted","Your submitted papers will appear here.")}</div>`},
-  finance:()=>`<div class="metric-grid">${metric("Delegates",state.data.delegates.length,"Finance tracking")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Countries",state.data.countries.length,"Registered")}${metric("Resolution papers",state.data.resolutions.length,"Submitted")}</div><div class="panel"><div class="panel-head"><div><h3>Finance department</h3><p>Conference-wide finance workspace.</p></div></div><div class="settings-actions"><button class="secondary" onclick="exportData()">Export conference data</button></div></div>`,
+  finance:()=>{const entries=state.data.financeEntries||[];const total=entries.reduce((a,e)=>a+(Number(e.price)||0),0);return `<div class="metric-grid">${metric("Total expenses",total.toFixed(2),"Conference spending")}${metric("Entries",entries.length,"Recorded expenses")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates",state.data.delegates.length,"Registered")}</div><div class="panel"><div class="panel-head"><div><h3>Finance department</h3><p>Record conference expenses and their prices. Changes are saved when you press Save.</p></div><button class="primary" onclick="openFinanceEntry()">+ Add expense</button></div>${entries.length?`<div class="table-panel"><table><thead><tr><th>Item / expense</th><th>Category</th><th>Price</th><th>Notes</th><th></th></tr></thead><tbody>${entries.map(e=>`<tr><td><strong>${esc(e.item)}</strong></td><td>${esc(e.category||"—")}</td><td>${Number(e.price||0).toFixed(2)}</td><td>${esc(e.notes||"—")}</td><td><button class="row-btn" onclick="openFinanceEntry('${e.id}')">Edit</button> <button class="row-btn danger" onclick="removeFinanceEntry('${e.id}')">Delete</button></td></tr>`).join("")}</tbody></table></div>`:empty("No finance entries","Add an expense to start tracking conference spending.")}<div class="settings-actions"><button class="secondary" onclick="exportData()">Export conference data</button></div></div>`},
   training:()=>`<div class="metric-grid">${metric("Committees",state.data.committees.length,"Training coverage")}${metric("Chairs",state.data.staff.filter(s=>s.role==="Chair").length,"Assigned")}${metric("Deputy Presidents",state.data.staff.filter(s=>s.role==="Deputy President").length,"Assigned")}${metric("Presidents",state.data.staff.filter(s=>s.role==="President").length,"Assigned")}</div><div class="panel"><div class="panel-head"><div><h3>Training department</h3><p>Manage training through the staff and dais assignments.</p></div><button class="primary" onclick="go('staff')">Open staff & dais</button></div></div>`,
   rapporteur:()=>`<div class="metric-grid">${metric("Resolution papers",state.data.resolutions.length,"Received")}${metric("On chairing screen",state.data.resolutions.filter(r=>r.status==="On chairing screen").length,"Live")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates",state.data.delegates.length,"Registered")}</div><div class="panel"><div class="panel-head"><div><h3>Rapporteur department</h3><p>Track resolution papers and committee routing.</p></div><button class="primary" onclick="go('resolutions')">Open papers</button></div></div>`,
 
@@ -499,6 +503,24 @@ function pauseScreenTimer(){state.data.screen.timerRunning=false;state.data.scre
 function resetScreenTimer(){state.data.screen.timerRunning=false;state.data.screen.timerSeconds=0;state.data.screen.updated=Date.now();save();render()}
 function updateScreen(){const sec=readTimerFields();state.data.screen={...state.data.screen,committeeId:document.getElementById("screenCom").value,speaker:document.getElementById("screenSpeaker").value.trim(),topic:document.getElementById("screenTopic").value.trim(),mode:document.getElementById("screenMode").value,motion:document.getElementById("screenMotion").value.trim(),timerSeconds:sec,updated:Date.now()};save();render()}
 function filterCards(q,id){q=q.toLowerCase();document.querySelectorAll(`#${id} .resource-card`).forEach(c=>c.style.display=c.textContent.toLowerCase().includes(q)?"":"none")}
+function openFinanceEntry(id=""){
+  const x=(state.data.financeEntries||[]).find(e=>e.id===id)||{};
+  modal(id?"Edit finance entry":"Add finance expense",`${formField("Expense / item","finItem",`value="${esc(x.item||"")}" placeholder="Venue, printing, badges..."`)}${formField("Category","finCategory",`value="${esc(x.category||"")}" placeholder="Venue, Supplies, Printing..."`)}${formField("Price","finPrice",`type="number" min="0" step="0.01" value="${x.price??""}" placeholder="0.00"`)}<label class="form-label">Notes</label><textarea id="finNotes" class="form-input" rows="3" placeholder="Optional notes">${esc(x.notes||"")}</textarea><button class="primary full" onclick="saveFinanceEntry('${id}')">Save expense</button>`);
+}
+function saveFinanceEntry(id=""){
+  const item=document.getElementById("finItem")?.value.trim();
+  const category=document.getElementById("finCategory")?.value.trim();
+  const price=Number(document.getElementById("finPrice")?.value);
+  const notes=document.getElementById("finNotes")?.value.trim()||"";
+  if(!item)return alert("Enter an expense or item.");
+  if(!Number.isFinite(price)||price<0)return alert("Enter a valid price.");
+  if(!Array.isArray(state.data.financeEntries))state.data.financeEntries=[];
+  if(id){const e=state.data.financeEntries.find(x=>x.id===id);if(e)Object.assign(e,{item,category,price,notes,updatedAt:Date.now()});}
+  else state.data.financeEntries.push({id:uid(),item,category,price,notes,createdAt:Date.now(),updatedAt:Date.now()});
+  save();closeModal();render();
+}
+function removeFinanceEntry(id){if(!confirm("Delete this finance entry?"))return;state.data.financeEntries=(state.data.financeEntries||[]).filter(e=>e.id!==id);save();render();}
+
 function openResource(){modal("Upload conference resource",`${formField("Title","resTitle",`placeholder="e.g. UNODC Background Guide"`)}${selectField("Committee (optional)","resCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Description</label><textarea id="resDesc" class="form-input" rows="4" placeholder="What is this file for?"></textarea><label class="form-label">File</label><input id="resFile" class="form-input" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx" onchange="showResourceFile(this)"><div id="resFileInfo" class="muted" style="margin-top:7px">PDF, DOC, DOCX, PPT or PPTX · maximum 30 MB</div><button class="primary full" onclick="saveResource()">Upload resource</button>`)}
 function showResourceFile(input){const f=input.files?.[0],box=document.getElementById("resFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>30*1024*1024){box.textContent="File is too large. Maximum size is 30 MB.";input.value=""}}
 async function saveResource(){const title=document.getElementById("resTitle").value.trim(),committeeId=document.getElementById("resCom").value,description=document.getElementById("resDesc").value.trim(),file=document.getElementById("resFile").files?.[0];if(!title||!file)return alert("Title and file are required.");if(file.size>30*1024*1024)return alert("The resource must be 30 MB or smaller.");const ext=file.name.toLowerCase().split(".").pop();if(!["pdf","doc","docx","ppt","pptx"].includes(ext))return alert("Please upload a PDF, DOC, DOCX, PPT or PPTX file.");const id=uid();showUploadLoading("resource");try{const filePath=await storeResourceFile(id,file);state.data.resources=state.data.resources||[];state.data.resources.push({id,title,committee:committeeId,description,fileName:file.name,fileType:file.type,fileSize:file.size,filePath:filePath,uploadedBy:state.role,uploadedAt:Date.now()});save();hideUploadLoading();closeModal();render();alert("Resource uploaded successfully.")}catch(e){console.error(e);hideUploadLoading();alert("The resource could not be uploaded to shared storage.\n\n"+(e?.message||e));}}
