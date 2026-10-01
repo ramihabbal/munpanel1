@@ -775,13 +775,27 @@ function gradingRoom(){
   const cards=countries.map(country=>{
     const d=state.data.delegates.find(x=>x.committee===c.id&&x.country===country.id);
     const g=hGrade(c.id,country.id);
-    const cats=rubric.map((cat,ci)=>`<div class="grade-category">
-      <div class="grade-category-head"><span>${esc(cat.name)}</span><span>/${cat.max}</span></div>
-      ${cat.criteria.map(([n,m],ri)=>`<label class="grade-criterion">
-        <span>${esc(n)} <small>/${m}</small></span>
-        <input id="g_${hId(country.id)}_${criterionKey(ci,ri)}" type="number" min="0" max="${m}" step="0.5" value="${esc(criterionValue(g,ci,ri,n))}" oninput="updateCountryGradeTotal('${country.id}')">
-      </label>`).join("")}
-    </div>`).join("");
+    const cats=hhhLanguage==="ar"
+      ? `<div class="arabic-grade-table-wrap" dir="rtl">
+          <table class="arabic-grade-table">
+            <thead><tr><th>المعيار</th><th>الحد الأقصى</th><th>العلامة</th></tr></thead>
+            <tbody>${rubric.map((cat,ci)=>`
+              <tr class="arabic-grade-section"><th colspan="3"><span>${esc(cat.name)}</span><span>/${cat.max}</span></th></tr>
+              ${cat.criteria.map(([n,m],ri)=>`<tr>
+                <td class="arabic-grade-name">${esc(n)}</td>
+                <td class="arabic-grade-max">${m}</td>
+                <td class="arabic-grade-score"><input id="g_${hId(country.id)}_${criterionKey(ci,ri)}" type="number" min="0" max="${m}" step="0.5" value="${esc(criterionValue(g,ci,ri,n))}" oninput="updateCountryGradeTotal('${country.id}')" aria-label="${esc(n)}"></td>
+              </tr>`).join("")}`).join("")}
+            </tbody>
+          </table>
+        </div>`
+      : rubric.map((cat,ci)=>`<div class="grade-category">
+          <div class="grade-category-head"><span>${esc(cat.name)}</span><span>/${cat.max}</span></div>
+          ${cat.criteria.map(([n,m],ri)=>`<label class="grade-criterion">
+            <span>${esc(n)} <small>/${m}</small></span>
+            <input id="g_${hId(country.id)}_${criterionKey(ci,ri)}" type="number" min="0" max="${m}" step="0.5" value="${esc(criterionValue(g,ci,ri,n))}" oninput="updateCountryGradeTotal('${country.id}')">
+          </label>`).join("")}
+        </div>`).join("");
     const saveText=hhhLanguage==="en"?"Save grade":hhhLanguage==="fr"?"Enregistrer la note":"حفظ العلامة";
     const deleteText=hhhLanguage==="en"?"Delete":hhhLanguage==="fr"?"Supprimer":"حذف";
     return `<details class="country-grade-card" dir="${hhhLanguage==='ar'?'rtl':'ltr'}" data-country="${esc(country.name.toLowerCase())}" data-delegate="${esc((d?.name||"").toLowerCase())}" ${openGradeCountries.has(country.id)?"open":""} ontoggle="setGradeCountryOpen('${country.id}',this.open)">
@@ -814,6 +828,23 @@ window.addEventListener("DOMContentLoaded",()=>{
 </script>
 
 <style>
+
+/* Dedicated Arabic grading table. The Arabic rubric uses a real table instead of the generic RTL flex/grid layout. */
+.arabic-grade-table-wrap{margin:12px 16px 18px;overflow-x:auto;border:1px solid #d9e0e7;border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(20,30,40,.04)}
+.arabic-grade-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;direction:rtl;font-family:Tahoma,Arial,"Segoe UI",sans-serif}
+.arabic-grade-table th,.arabic-grade-table td{padding:12px 14px;border-bottom:1px solid #e8edf2;vertical-align:middle}
+.arabic-grade-table thead th{background:#eef3f7;color:#263746;font-weight:700;text-align:right;border-bottom:2px solid #d6dee6}
+.arabic-grade-table thead th:nth-child(1){width:auto}
+.arabic-grade-table thead th:nth-child(2){width:130px;text-align:center}
+.arabic-grade-table thead th:nth-child(3){width:130px;text-align:center}
+.arabic-grade-table tbody tr:last-child td{border-bottom:0}
+.arabic-grade-section th{padding:10px 14px;background:#f5f7f9;color:#1f2d38;font-size:14px;text-align:right;border-top:1px solid #d9e0e7;border-bottom:1px solid #d9e0e7}
+.arabic-grade-section th span:last-child{float:left;color:#66727d;white-space:nowrap}
+.arabic-grade-name{text-align:right;font-weight:500;line-height:1.55;word-break:normal;overflow-wrap:anywhere}
+.arabic-grade-max,.arabic-grade-score{text-align:center;font-variant-numeric:tabular-nums}
+.arabic-grade-score input{width:82px;height:38px;box-sizing:border-box;border:1px solid #c8d1da;border-radius:7px;background:#fff;text-align:center;direction:ltr;font:inherit;font-size:15px}
+.arabic-grade-score input:focus{outline:none;border-color:#198bd1;box-shadow:0 0 0 3px rgba(25,139,209,.12)}
+@media(max-width:700px){.arabic-grade-table{min-width:620px}.arabic-grade-table-wrap{margin:10px}.arabic-grade-table th,.arabic-grade-table td{padding:10px 12px}}
 /* Robust RTL grading layout */
 .grading-room[dir="rtl"] .country-grade-card,
 .country-grade-card[dir="rtl"] { direction: rtl; }
