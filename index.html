@@ -275,9 +275,15 @@ async function downloadResolutionFile(id){const r=state.data.resolutions.find(x=
 async function downloadResourceFile(id){const r=(state.data.resources||[]).find(x=>x.id===id);if(!r)return alert("Resource not found.");await downloadStorageFile(r.filePath,r.fileName);}
 
 async function refreshLoginCommitteeOptions(){
-  // The login page exists before the authenticated app loads, so explicitly
-  // refresh the shared conference state when a role is selected.
-  await pullRemoteState();
+  // The login page exists before the authenticated app loads, so fetch the
+  // latest staff/committee assignments before building the dropdown.
+  const wrap=document.getElementById("loginCommitteeWrap");
+  const select=document.getElementById("loginCommittee");
+  if(!wrap||!select)return;
+  updateLoginCommitteeOptions();
+  try{
+    await pullRemoteState();
+  }catch(e){console.warn("Unable to refresh committee assignments",e)}
   updateLoginCommitteeOptions();
 }
 
@@ -294,10 +300,19 @@ function updateLoginCommitteeOptions(){
     return;
   }
   const assignedRole=dais[role];
+  // Staff records created by older versions may store the committee as an id,
+  // a committeeId, or (legacy) the committee name. Normalize all three here.
   const ids=[...new Set((state.data.staff||[])
-    .filter(s=>s.role===assignedRole && s.committee)
-    .map(s=>s.committee)
-    .filter(id=>committee(id)) )];
+    .filter(s=>s.role===assignedRole)
+    .map(s=>s.committeeId||s.committee)
+    .map(value=>{
+      if(!value)return "";
+      const byId=committee(value);
+      if(byId)return byId.id;
+      const byName=(state.data.committees||[]).find(c=>String(c.name).toLowerCase()===String(value).toLowerCase());
+      return byName?.id||"";
+    })
+    .filter(Boolean))];
   const previous=select.value;
   select.innerHTML='<option value="">Select committee</option>'+ids.map(id=>{
     const c=committee(id);
@@ -434,7 +449,7 @@ function saveStaff(id){
  }
  const conferenceRoles=["Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"];
  const finalCommittee=conferenceRoles.includes(role)?"":com;
- const obj={id:id||uid(),name,role,committee:finalCommittee};
+ const obj={id:id||uid(),name,role,committee:finalCommittee,committeeId:finalCommittee};
  const i=state.data.staff.findIndex(x=>x.id===id);
  i>=0?state.data.staff[i]=obj:state.data.staff.push(obj);
  save();closeModal();render();
@@ -463,7 +478,7 @@ ${assignedCountries.map(country=>{const d=ds.find(d=>d.country===country.id);con
 </div>`}).join("")||'<div class="empty-state"><strong>No countries assigned yet.</strong><p>Add countries above, then choose Present or Present and Voting for each country.</p></div>'}
 </div></div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>Set each country's status above. Changes save automatically.</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Absent"].map(a=>{const n=assignedCountries.filter(c=>((c.attendance||{})[id]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Private grading password for this committee</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="primary" onclick="goToGrading('${id}')">Open grading</button><button class="secondary" onclick="setScreenCommittee('${id}')">Use on chairing screen</button><button class="secondary" onclick="rotateCommitteePassword('${id}')">Generate new password</button></div></div>`}
 function openDaisAssignment(committeeId,role){const current=state.data.staff.find(s=>s.committee===committeeId&&s.role===role);const names=state.data.staff.filter(s=>s.role===role&&(s.committee===committeeId||!s.committee));modal(`Assign ${role}`,`${formField("Full name","daisName",`value="${esc(current?.name||"")}" placeholder="Full name"`)}<p class="muted">This assignment only grants this Dais role access to the selected committee.</p><button class="primary full" onclick="saveDaisAssignment('${committeeId}','${role}','${current?.id||""}')">Save assignment</button>`) }
-function saveDaisAssignment(committeeId,role,id){const name=document.getElementById("daisName").value.trim();if(!name)return alert("Name is required.");let existing=state.data.staff.find(s=>s.id===id)||state.data.staff.find(s=>s.committee===committeeId&&s.role===role);if(existing){existing.name=name;existing.committee=committeeId;existing.role=role}else state.data.staff.push({id:uid(),name,role,committee:committeeId});save();closeModal();openCommitteePanel(committeeId)}
+function saveDaisAssignment(committeeId,role,id){const name=document.getElementById("daisName").value.trim();if(!name)return alert("Name is required.");let existing=state.data.staff.find(s=>s.id===id)||state.data.staff.find(s=>s.committee===committeeId&&s.role===role);if(existing){existing.name=name;existing.committee=committeeId;existing.committeeId=committeeId;existing.role=role}else state.data.staff.push({id:uid(),name,role,committee:committeeId,committeeId:committeeId});save();closeModal();openCommitteePanel(committeeId)}
 function saveBulkCountries(committeeId){const lines=document.getElementById("bulkCountries").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return alert("Enter at least one country.");for(const line of lines){const parts=line.split("|").map(x=>x.trim());const countryName=parts[0],delegateName=parts[1]||"";if(!countryName)continue;let country=state.data.countries.find(c=>c.name.toLowerCase()===countryName.toLowerCase());if(!country){country={id:uid(),name:countryName,committees:[]};state.data.countries.push(country)}country.committees=country.committees||[];if(!country.committees.includes(committeeId))country.committees.push(committeeId);if(delegateName){let d=state.data.delegates.find(x=>x.committee===committeeId&&x.country===country.id);if(d)d.name=delegateName;else state.data.delegates.push({id:uid(),name:delegateName,committee:committeeId,country:country.id})}}save();closeModal();openCommitteePanel(committeeId)}
 function setCountryAttendance(countryId,committeeId,value){const c=state.data.countries.find(x=>x.id===countryId);if(!c)return;c.attendance=c.attendance||{};if(value)c.attendance[committeeId]=value;else delete c.attendance[committeeId];save();}
 function removeCountryFromCommittee(countryId,committeeId){const c=state.data.countries.find(x=>x.id===countryId);if(!c)return;if(!confirm("Remove this country from this committee?"))return;c.committees=(c.committees||[]).filter(x=>x!==committeeId);state.data.delegates=state.data.delegates.filter(d=>!(d.country===countryId&&d.committee===committeeId));save();openCommitteePanel(committeeId)}
