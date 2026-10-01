@@ -22,7 +22,7 @@
       <h1>Administration sign in</h1>
       <p class="muted">Authorized conference staff only.</p>
       <label>Role</label>
-      <select id="accountType" onchange="updateLoginCommitteeOptions()">
+      <select id="accountType" onchange="refreshLoginCommitteeOptions()">
         <option value="" selected disabled>Select role</option>
         <option value="president">President</option>
         <option value="deputy">Deputy President</option>
@@ -273,6 +273,13 @@ async function downloadStorageFile(path,name){
 }
 async function downloadResolutionFile(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return alert("Resolution paper not found.");await downloadStorageFile(r.filePath,r.fileName);}
 async function downloadResourceFile(id){const r=(state.data.resources||[]).find(x=>x.id===id);if(!r)return alert("Resource not found.");await downloadStorageFile(r.filePath,r.fileName);}
+
+async function refreshLoginCommitteeOptions(){
+  // The login page exists before the authenticated app loads, so explicitly
+  // refresh the shared conference state when a role is selected.
+  await pullRemoteState();
+  updateLoginCommitteeOptions();
+}
 
 function updateLoginCommitteeOptions(){
   const role=document.getElementById("accountType")?.value||"";
