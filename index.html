@@ -22,7 +22,8 @@
       <h1>Administration sign in</h1>
       <p class="muted">Authorized conference staff only.</p>
       <label>Role</label>
-      <select id="accountType">
+      <select id="accountType" onchange="updateLoginCommitteeOptions()">
+        <option value="" selected disabled>Select role</option>
         <option value="president">President</option>
         <option value="deputy">Deputy President</option>
         <option value="sg">Secretary-General</option>
@@ -34,6 +35,13 @@
         <option value="chair">Chair</option>
         <option value="delegate">Delegate</option>
       </select>
+      <div id="loginCommitteeWrap" class="hidden">
+        <label>Committee</label>
+        <select id="loginCommittee">
+          <option value="">Select committee</option>
+        </select>
+        <div class="muted" style="margin-top:6px;font-size:12px">Select the committee assigned to this President, Deputy President, or Chair by Head of Logistics.</div>
+      </div>
       <label>Password</label>
       <input id="password" type="password" autocomplete="current-password" placeholder="Enter password">
       <button class="primary full" onclick="login()">Sign in</button>
@@ -231,8 +239,8 @@ window.roles={
 const passWords=["Cedar","Orbit","Maple","Harbor","Quartz","Atlas","Lantern","Signal","Raven","Vector","Summit","Comet","Pine","Marble","Copper","Lunar"];
 function generateCommitteePassword(){const a=passWords[Math.floor(Math.random()*passWords.length)],b=passWords[Math.floor(Math.random()*passWords.length)],n=Math.floor(10+Math.random()*90);return `${a}!${b}${n}`;}
 function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=(d.committees||[]).map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));d.financeEntries=Array.isArray(d.financeEntries)?d.financeEntries:[];return d}catch{return structuredClone(defaults)}}
-const state={role:null,page:"overview",data:loadData(),gradingCommittee:""};
-setTimeout(()=>{pullRemoteState();startRemoteSync()},0);
+const state={role:null,page:"overview",data:loadData(),gradingCommittee:"",assignedCommittee:""};
+setTimeout(()=>{pullRemoteState().then(()=>updateLoginCommitteeOptions()).catch(()=>{});startRemoteSync()},0);
 function save(){saveLocalOnly();scheduleRemoteSave();}
 const FILE_DB="hhhsmUN_resolution_files";
 function openFileDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(FILE_DB,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files");if(!db.objectStoreNames.contains("resources"))db.createObjectStore("resources")};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
@@ -266,15 +274,62 @@ async function downloadStorageFile(path,name){
 async function downloadResolutionFile(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return alert("Resolution paper not found.");await downloadStorageFile(r.filePath,r.fileName);}
 async function downloadResourceFile(id){const r=(state.data.resources||[]).find(x=>x.id===id);if(!r)return alert("Resource not found.");await downloadStorageFile(r.filePath,r.fileName);}
 
+function updateLoginCommitteeOptions(){
+  const role=document.getElementById("accountType")?.value||"";
+  const wrap=document.getElementById("loginCommitteeWrap");
+  const select=document.getElementById("loginCommittee");
+  const dais={president:"President",deputy:"Deputy President",chair:"Chair"};
+  if(!wrap||!select)return;
+  if(!dais[role]){
+    wrap.classList.add("hidden");
+    select.innerHTML='<option value="">Select committee</option>';
+    select.value="";
+    return;
+  }
+  const assignedRole=dais[role];
+  const ids=[...new Set((state.data.staff||[])
+    .filter(s=>s.role===assignedRole && s.committee)
+    .map(s=>s.committee)
+    .filter(id=>committee(id)) )];
+  const previous=select.value;
+  select.innerHTML='<option value="">Select committee</option>'+ids.map(id=>{
+    const c=committee(id);
+    return `<option value="${esc(id)}">${esc(c?.name||id)}</option>`;
+  }).join("");
+  if(ids.includes(previous))select.value=previous;
+  wrap.classList.remove("hidden");
+}
+
 async function login(){
- const type=document.getElementById("accountType").value,pass=document.getElementById("password").value;
- if(pass!==loginPasswords[type]){document.getElementById("loginError").textContent="Incorrect password.";return}
- state.role=type;state.page=window.roles[type].pages[0][0];state.gradingCommittee="";document.getElementById("loginError").textContent="";document.getElementById("loginView").classList.add("hidden");document.getElementById("appView").classList.remove("hidden");
- // Load the shared conference state before rendering pages that depend on committees.
+ const type=document.getElementById("accountType").value,pass=document.getElementById("password").value.trim();
+ // Refresh the shared state first so committee assignments made by Head of Logistics are current.
  await pullRemoteState();
+ updateLoginCommitteeOptions();
+ const roleCommitteeMap={president:"President",deputy:"Deputy President",chair:"Chair"};
+ const requiredRole=roleCommitteeMap[type];
+ const selectedCommittee=document.getElementById("loginCommittee")?.value||"";
+ if(requiredRole){
+   if(!selectedCommittee){
+     document.getElementById("loginError").textContent="Please select your committee.";
+     return;
+   }
+   const assigned=state.data.staff.some(s=>s.role===requiredRole && s.committee===selectedCommittee);
+   if(!assigned){
+     document.getElementById("loginError").textContent="This committee is not assigned to this role.";
+     return;
+   }
+ }
+ if(pass!==loginPasswords[type]){document.getElementById("loginError").textContent="Incorrect password.";return}
+ state.role=type;
+ state.assignedCommittee=requiredRole?selectedCommittee:"";
+ state.page=window.roles[type].pages[0][0];
+ state.gradingCommittee="";
+ document.getElementById("loginError").textContent="";
+ document.getElementById("loginView").classList.add("hidden");
+ document.getElementById("appView").classList.remove("hidden");
  renderShell();render();if(state.page==="delegatePortal")populateDelegateSubmitters();
 }
-function logout(){state.role=null;document.getElementById("appView").classList.add("hidden");document.getElementById("loginView").classList.remove("hidden");document.getElementById("password").value=""}
+function logout(){state.role=null;state.assignedCommittee="";document.getElementById("appView").classList.add("hidden");document.getElementById("loginView").classList.remove("hidden");document.getElementById("password").value="";if(document.getElementById("loginCommittee"))document.getElementById("loginCommittee").value="";updateLoginCommitteeOptions()}
 function renderShell(){const r=window.roles[state.role];document.getElementById("roleChip").textContent=r.label;document.getElementById("userName").textContent=r.name;document.getElementById("avatar").textContent=r.avatar;document.getElementById("nav").innerHTML=r.pages.map(p=>`<button class="nav-item ${state.page===p[0]?'active':''}" onclick="go('${p[0]}')"><span>${icon(p[0])}</span>${p[1]}</button>`).join("")}
 function icon(p){return ({overview:"⌂",committees:"▦",countries:"◎",staff:"♜",delegates:"♙",resolutions:"§",grading:"★",screen:"◉",mycommittee:"▦",delegatePortal:"§",myResolutions:"▤",finance:"$",training:"T",rapporteur:"R",resources:"▤",logisticsRequests:"!",settings:"⚙"})[p]||"•"}
 function go(p){
@@ -359,7 +414,25 @@ function saveCommittee(id){const name=document.getElementById("fName").value.tri
 function openCountry(id=""){const x=state.data.countries.find(x=>x.id===id)||{committees:[]};modal(id?"Edit country":"Add country",`${formField("Country name","fCountry",`value="${esc(x.name||"")}"`)}<label class="form-label">Committees where this country is available</label><div class="check-grid">${state.data.committees.length?state.data.committees.map(c=>`<label><input type="checkbox" name="fCom" value="${c.id}" ${(x.committees||[]).includes(c.id)?"checked":""}> ${esc(c.name)}</label>`).join(""):"<span class='muted'>Create committees first.</span>"}</div><button class="primary full" onclick="saveCountry('${id}')">Save country</button>`)}
 function saveCountry(id){const name=document.getElementById("fCountry").value.trim();if(!name)return alert("Country name is required.");const committees=[...document.querySelectorAll('input[name="fCom"]:checked')].map(x=>x.value),obj={id:id||uid(),name,committees};const i=state.data.countries.findIndex(x=>x.id===id);i>=0?state.data.countries[i]=obj:state.data.countries.push(obj);save();closeModal();render()}
 function openStaff(id=""){const x=state.data.staff.find(x=>x.id===id)||{};const rolesList=["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Chair"];modal(id?"Edit staff member":"Add staff member",`${formField("Full name","fStaff",`value="${esc(x.name||"")}"`)}${selectField("Role","fRole",rolesList.map(r=>`<option ${x.role===r?"selected":""}>${r}</option>`).join(""))}${selectField("Committee","fStaffCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveStaff('${id}')">Save staff member</button>`)}
-function saveStaff(id){const name=document.getElementById("fStaff").value.trim(),role=document.getElementById("fRole").value,com=document.getElementById("fStaffCom").value;if(!name)return alert("Name is required.");if(["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"].includes(role))com="";if(["President","Deputy President","Chair"].includes(role)&&com){const occupied=state.data.staff.find(s=>s.id!==id&&s.committee===com&&s.role===role);if(occupied)return alert(`This committee already has a ${role}.`)}const obj={id:id||uid(),name,role,committee:com};const i=state.data.staff.findIndex(x=>x.id===id);i>=0?state.data.staff[i]=obj:state.data.staff.push(obj);save();closeModal();render()}
+function saveStaff(id){
+ const name=document.getElementById("fStaff").value.trim();
+ const role=document.getElementById("fRole").value;
+ const com=document.getElementById("fStaffCom").value;
+ if(!name)return alert("Name is required.");
+ const committeeRoles=["President","Deputy President","Chair"];
+ if(committeeRoles.includes(role) && !com)return alert("A committee must be assigned to every President, Deputy President, and Chair.");
+ if(committeeRoles.includes(role) && com){
+   const occupied=state.data.staff.find(s=>s.id!==id&&s.committee===com&&s.role===role);
+   if(occupied)return alert(`This committee already has a ${role}.`);
+ }
+ const conferenceRoles=["Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"];
+ const finalCommittee=conferenceRoles.includes(role)?"":com;
+ const obj={id:id||uid(),name,role,committee:finalCommittee};
+ const i=state.data.staff.findIndex(x=>x.id===id);
+ i>=0?state.data.staff[i]=obj:state.data.staff.push(obj);
+ save();closeModal();render();
+}
+
 
 function countriesPanel(){const selected=state.countryCommittee||state.data.committees[0]?.id||"";const c=committee(selected);const countries=state.data.countries.filter(x=>(x.committees||[]).includes(selected));return `<div class="toolbar"><div class="field-inline"><label>Committee</label><select class="committee-selector" onchange="state.countryCommittee=this.value;render()">${state.data.committees.map(x=>`<option value="${x.id}" ${x.id===selected?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>${canManage()?`<button class="primary" onclick="openCountry()">+ Add country</button>`:""}</div><div class="panel"><div class="panel-head"><div><h3>${esc(c?.name||"Countries")}</h3><p>Select the attendance status for each country. Changes save automatically.</p></div><span class="status in-session">${countries.length} countries</span></div><div class="country-list"><div class="country-attendance-head"><strong>Country</strong><strong>Attendance</strong></div>${countries.length?countries.map(country=>{const att=(country.attendance||{})[selected]||"";return `<div class="country-panel-row"><strong>${esc(country.name)}</strong><select class="attendance-select" onchange="setCountryAttendance('${country.id}','${selected}',this.value)"><option value="">Select attendance</option><option value="Present" ${att==="Present"?"selected":""}>Present</option><option value="Present and Voting" ${att==="Present and Voting"?"selected":""}>Present and Voting</option><option value="Absent" ${att==="Absent"?"selected":""}>Absent</option></select></div>`}).join(""):`<div class="empty-state"><strong>No countries assigned to this committee yet.</strong><p>Add countries through the committee management panel.</p></div>`}</div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>${esc(c?.name||"")}</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Absent"].map(a=>{const n=countries.filter(x=>((x.attendance||{})[selected]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div>`}
 function openDelegate(id=""){const x=state.data.delegates.find(x=>x.id===id)||{};modal(id?"Edit delegate":"Add delegate",`${formField("Delegate name","fDel",`value="${esc(x.name||"")}"`)}${selectField("Committee","fDelCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}${selectField("Country","fDelCountry",`<option value="">Select country</option>`+state.data.countries.map(c=>`<option value="${c.id}" ${x.country===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveDelegate('${id}')">Save delegate</button>`)}
@@ -848,7 +921,24 @@ function enterGrading(){
   state.gradingCommittee=id;
   render();
 }
-const _oldGrading=pages.grading;pages.grading=()=>{const allowed=state.data.committees.filter(c=>canAccessCommitteeGrading(c.id)),lab=hhhLanguage==="en"?"Committee":hhhLanguage==="fr"?"Comité":"اللجنة",ph=hhhLanguage==="en"?"Select committee":hhhLanguage==="fr"?"Sélectionner un comité":"اختر اللجنة",isPresidentRole=["president","deputy"].includes(state.role),pw=isPresidentRole?(hhhLanguage==="en"?"Main account password":hhhLanguage==="fr"?"Mot de passe principal du compte":"كلمة de passe principale du compte"):hhhLanguage==="en"?"Committee grading password":hhhLanguage==="fr"?"Mot de passe d’évaluation":"كلمة مرور تقييم اللجنة",btn=hhhLanguage==="en"?"Enter grading system":hhhLanguage==="fr"?"Accéder au système d’évaluation":"الدخول إلى نظام التقييم";if(state.gradingCommittee)return gradingRoom();return `<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>${hhhLanguage==="en"?"Enter a committee grading room":hhhLanguage==="fr"?"Accéder à la salle d’évaluation":"الدخول إلى نظام تقييم اللجنة"}</h3><p>${isPresidentRole?(hhhLanguage==="en"?"Select your committee, then use your main account password to enter grading.":hhhLanguage==="fr"?"Sélectionnez votre comité, puis utilisez le mot de passe principal de votre compte.":"اختر لجنتك، ثم استخدم كلمة المرور الرئيسية لحسابك للدخول إلى التقييم."):(hhhLanguage==="en"?"The selected website language controls the grading rubric.":hhhLanguage==="fr"?"La langue du site contrôle le barème.":"لغة الموقع المختارة تتحكم في نموذج التقييم.")}</p></div></div><div class="panel"><div class="modal-body">${selectField(lab,"gradeCom",`<option value="">${ph}</option>`+allowed.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}${["logistics","sg","training","advisory"].includes(state.role)?"":formField(pw,"gradePass",`type="password" placeholder="${pw}" autocomplete="current-password"`)}<button class="primary full" onclick="enterGrading()">${btn}</button></div></div>`};
+const _oldGrading=pages.grading;pages.grading=()=>{
+ const daisRole=["president","deputy","chair"].includes(state.role);
+ const allowed=daisRole
+   ?(state.assignedCommittee?[committee(state.assignedCommittee)].filter(Boolean):[])
+   :state.data.committees.filter(c=>canAccessCommitteeGrading(c.id));
+ const lab=hhhLanguage==="en"?"Committee":hhhLanguage==="fr"?"Comité":"اللجنة";
+ const ph=hhhLanguage==="en"?"Select committee":hhhLanguage==="fr"?"Sélectionner un comité":"اختر اللجنة";
+ const pw=daisRole
+   ?(hhhLanguage==="en"?"Main account password":hhhLanguage==="fr"?"Mot de passe principal du compte":"كلمة مرور الحساب الرئيسية")
+   :(hhhLanguage==="en"?"Committee grading password":hhhLanguage==="fr"?"Mot de passe d’évaluation":"كلمة مرور تقييم اللجنة");
+ const btn=hhhLanguage==="en"?"Enter grading system":hhhLanguage==="fr"?"Accéder au système d’évaluation":"الدخول إلى نظام التقييم";
+ if(state.gradingCommittee)return gradingRoom();
+ const description=daisRole
+   ?(hhhLanguage==="en"?"Your committee was selected at sign-in. Use your main account password to enter grading.":hhhLanguage==="fr"?"Votre comité a été sélectionné lors de la connexion. Utilisez le mot de passe principal de votre compte pour accéder à l’évaluation.":"تم اختيار لجنتك عند تسجيل الدخول. استخدم كلمة مرور حسابك الرئيسية للدخول إلى التقييم.")
+   :(hhhLanguage==="en"?"The selected website language controls the grading rubric.":hhhLanguage==="fr"?"La langue du site contrôle le barème.":"لغة الموقع المختارة تتحكم في نموذج التقييم.");
+ return `<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>${hhhLanguage==="en"?"Enter a committee grading room":hhhLanguage==="fr"?"Accéder à la salle d’évaluation":"الدخول إلى نظام تقييم اللجنة"}</h3><p>${description}</p></div></div><div class="panel"><div class="modal-body">${selectField(lab,"gradeCom",`<option value="">${ph}</option>`+allowed.map(c=>`<option value="${c.id}" ${daisRole&&c.id===state.assignedCommittee?"selected":""}>${esc(c.name)}</option>`).join(""))}${["logistics","sg","training","advisory"].includes(state.role)?"":formField(pw,"gradePass",`type="password" placeholder="${pw}" autocomplete="current-password"`)}<button class="primary full" onclick="enterGrading()">${btn}</button></div></div>`;
+};
+
 window.addEventListener("DOMContentLoaded",()=>{
   addHHHLangUI();
 });
