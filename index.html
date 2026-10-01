@@ -724,7 +724,15 @@ function hhhRoleName(){return state.role==="president"?"President":state.role===
 function hhhRoleCommittees(){
   const rn=hhhRoleName();
   if(!rn)return [];
-  return [...new Set((state.data.staff||[]).filter(s=>s.role===rn&&s.committee).map(s=>s.committee))];
+  const assigned=[...new Set((state.data.staff||[]).filter(s=>s.role===rn&&s.committee).map(s=>s.committee))];
+  // If the conference has exactly one committee and this Dais role has not
+  // been assigned yet, that committee is unambiguous and should still appear
+  // in the committee/password selector. Once multiple committees exist, the
+  // normal staff assignment controls which committees the role can access.
+  if(!assigned.length && (state.data.committees||[]).length===1){
+    return [state.data.committees[0].id];
+  }
+  return assigned;
 }
 function hhhRoleCommittee(){return hhhRoleCommittees()[0]||null}
 function canAccessCommitteeGrading(cid){
