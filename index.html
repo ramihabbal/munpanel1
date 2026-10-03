@@ -204,7 +204,7 @@ function startRemoteSync(){
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
         const incoming=payload?.new?.data;
         if(!incoming || localDirty || isGradingLocked() || isUiEditing())return;
-        state.data={...structuredClone(defaults),...incoming};
+        state.data=normalizeConferenceData(incoming);
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
         // Background realtime updates must not re-render the Chairing Screen.
@@ -221,7 +221,7 @@ function startRemoteSync(){
         // Do not replace the Chairing Screen form from background polling.
         // Its text/select changes are published only by "Update connected screen".
         if(state.page==="screen") return;
-        state.data={...structuredClone(defaults),...data.data};
+        state.data=normalizeConferenceData(data.data);
         lastRemoteSnapshot=cloneData(state.data);
         saveLocalOnly();
         if(state.role) render();
@@ -252,7 +252,7 @@ window.roles={
   logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["settings","Settings"]]},
   finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
   training:{label:"Head of Training",name:"Head of Training",avatar:"HT",pages:[["overview","Overview"],["training","Training"],["grading","Grading"],["resources","Resources"]]},
-  rapporteur:{label:"Head of Rapporteurs",name:"Head of Rapporteurs",avatar:"HR",pages:[["overview","Overview"],["rapporteur","Rapporteurs"],["resources","Resources"]]},
+  rapporteur:{label:"Head of Rapporteurs",name:"Head of Rapporteurs",avatar:"HR",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["resources","Resources"],["rapporteur","Rapporteurs"]]},
   advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
   chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["overview","Overview"],["mycommittee","My Committee"],["screen","Chairing Screen"],["grading","Grading"],["resolutions","Resolution Papers"],["resources","Resources"],["logisticsRequests","Logistics Requests"]]},
   delegate:{label:"Delegate",name:"Delegate",avatar:"D",pages:[["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["resources","Resources"]]}
@@ -592,7 +592,27 @@ function fulfillLogisticsRequest(id){if(state.role!=="logistics")return;const r=
 function rotateCommitteePassword(id){const c=committee(id);if(!c)return;if(!confirm("Generate a new private grading password for this committee?"))return;c.gradingPassword=generateCommitteePassword();save();openCommitteePanel(id)}
 function goToGrading(id){closeModal();state.gradingCommittee=id;go("grading")}
 function setScreenCommittee(id){state.data.screen.committeeId=id;state.data.screen.updated=Date.now();save();closeModal();go("screen")}
-function populateDelegateSubmitters(){const com=document.getElementById("dpCom"),main=document.getElementById("dpMain"),co=document.getElementById("dpCo");if(!com||!main||!co)return;const ds=state.data.delegates.filter(d=>d.committee===com.value);const opts=ds.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");main.innerHTML=opts;co.innerHTML=opts;main.onchange=()=>{const selected=new Set([...main.selectedOptions].map(o=>o.value));[...co.options].forEach(o=>o.disabled=selected.has(o.value));}}
+function populateDelegateSubmitters(){
+  const com=document.getElementById("dpCom"),main=document.getElementById("dpMain"),co=document.getElementById("dpCo");
+  if(!com||!main||!co)return;
+  const ds=state.data.delegates.filter(d=>d.committee===com.value);
+  const opts=ds.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");
+  main.innerHTML=opts; co.innerHTML=opts;
+  syncSubmitterExclusion(main,co);
+  main.onchange=()=>syncSubmitterExclusion(main,co);
+  co.onchange=()=>syncSubmitterExclusion(co,main);
+}
+function syncSubmitterExclusion(source,other){
+  const selected=new Set([...source.selectedOptions].map(o=>o.value));
+  [...other.options].forEach(o=>{o.disabled=selected.has(o.value);if(o.disabled&&o.selected)o.selected=false;});
+}
+function delegateIdsToNames(values){
+  return values.map(v=>state.data.delegates.find(d=>String(d.id)===String(v))?.name).filter(Boolean);
+}
+function resolveSubmitterSelection(values,recordedNames){
+  const names=values.map(v=>state.data.delegates.find(d=>String(d.id)===String(v))?.name).filter(Boolean);
+  return names.length?names:(recordedNames||[]);
+}
 function showSelectedFile(input){const f=input.files?.[0],box=document.getElementById("dpFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>20*1024*1024){box.textContent="File is too large. Maximum size is 20 MB.";input.value="";}}
 function showUploadLoading(kind="upload"){
   const o=document.getElementById("uploadLoading"),t=document.getElementById("uploadLoadingTitle"),x=document.getElementById("uploadLoadingText");
@@ -606,9 +626,42 @@ function hideUploadLoading(){const o=document.getElementById("uploadLoading");if
 function setUploadButtonBusy(id,busy,label){const b=document.getElementById(id);if(!b)return;b.disabled=busy;if(busy)b.dataset.originalLabel=b.textContent,b.textContent=label;else if(b.dataset.originalLabel)b.textContent=b.dataset.originalLabel}
 
 async function submitDelegateResolution(){const title=document.getElementById("dpTitle").value.trim(),committeeId=document.getElementById("dpCom").value,main=selectedValues("dpMain"),co=selectedValues("dpCo"),file=document.getElementById("dpFile").files?.[0];if(!title||!committeeId||!main.length||!file)return alert("Title, committee, at least one main submitter and a resolution file are required.");if(file.size>20*1024*1024)return alert("The resolution file must be 20 MB or smaller.");const allowed=["application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"];const ext=file.name.toLowerCase().split(".").pop();if(!allowed.includes(file.type)&&!["pdf","doc","docx"].includes(ext))return alert("Please upload a PDF, DOC or DOCX file.");const id=uid();showUploadLoading("resolution");try{const filePath=await storeResolutionFile(id,file);const obj={id,title,committee:committeeId,main:main.map(x=>state.data.delegates.find(d=>d.id===x)?.name).filter(Boolean),co:co.map(x=>state.data.delegates.find(d=>d.id===x)?.name).filter(Boolean),fileName:file.name,fileType:file.type,fileSize:file.size,filePath:filePath,status:"Submitted to SG",submittedAt:Date.now()};state.data.resolutions.push(obj);save();hideUploadLoading();alert("Resolution paper uploaded and submitted to the Secretary-General and chairing panel.");go("myResolutions")}catch(e){console.error(e);hideUploadLoading();alert("The file could not be uploaded to shared storage.\n\n"+(e?.message||e));}}
-function openResolution(id=""){const r=state.data.resolutions.find(x=>x.id===id)||{};const ds=state.data.delegates.filter(x=>x.committee===r.committee);const mainNames=r.main||[],coNames=r.co||[];const mainOpts=ds.map(d=>`<option value="${esc(d.name)}" ${mainNames.includes(d.name)?"selected":""}>${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");const coOpts=ds.map(d=>`<option value="${esc(d.name)}" ${coNames.includes(d.name)?"selected":""}>${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");const attachment=r.fileName?`<div class="file-info"><strong>Uploaded paper:</strong> <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button> · ${(r.fileSize/1024/1024).toFixed(2)} MB</div>`:"";modal(id?"Review resolution paper":"Submit resolution paper",`${formField("Title","rTitle",`value="${esc(r.title||"")}"`)}${selectField("Committee","rCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${r.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="rMain" class="form-input" multiple size="4">${mainOpts}</select><label class="form-label">Co-submitters</label><select id="rCo" class="form-input" multiple size="5">${coOpts}</select>${attachment}<label class="form-label">Resolution text / clauses (optional when a file is uploaded)</label><textarea id="rClauses" class="form-input" rows="7" placeholder="Optional text copy">${esc(r.clauses||"")}</textarea><div class="settings-actions"><button class="primary" onclick="saveResolution('${id}')">${id?"Update paper":"Submit paper"}</button>${id?`<button class="secondary" onclick="approveResolution('${id}')">Approve / send to chair</button><button class="secondary" onclick="setResolutionScreen('${id}')">Send to chairing screen</button>`:""}</div>`)}
+function openResolution(id=""){
+  const r=state.data.resolutions.find(x=>x.id===id)||{};
+  const ds=state.data.delegates.filter(x=>x.committee===r.committee);
+  const mainNames=Array.isArray(r.main)?r.main:[],coNames=Array.isArray(r.co)?r.co:[];
+  const optionFor=(d,selectedNames)=>{
+    const selected=selectedNames.includes(d.name);
+    return `<option value="${esc(d.id)}" ${selected?"selected":""}>${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`;
+  };
+  const mainOpts=ds.map(d=>optionFor(d,mainNames)).join("");
+  const coOpts=ds.map(d=>optionFor(d,coNames)).join("");
+  const attachment=r.fileName?`<div class="file-info"><strong>Uploaded paper:</strong> <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button> · ${(Number(r.fileSize||0)/1024/1024).toFixed(2)} MB</div>`:"";
+  modal(id?"Review resolution paper":"Submit resolution paper",`${formField("Title","rTitle",`value="${esc(r.title||"")}"`)}${selectField("Committee","rCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${r.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="rMain" class="form-input" multiple size="4">${mainOpts}</select><label class="form-label">Co-submitters</label><select id="rCo" class="form-input" multiple size="5">${coOpts}</select>${attachment}<label class="form-label">Resolution text / clauses (optional when a file is uploaded)</label><textarea id="rClauses" class="form-input" rows="7" placeholder="Optional text copy">${esc(r.clauses||"")}</textarea><div class="settings-actions"><button class="primary" onclick="saveResolution('${id}')">${id?"Update paper":"Submit paper"}</button>${id?`<button class="secondary" onclick="approveResolution('${id}')">Approve / send to chair</button><button class="secondary" onclick="setResolutionScreen('${id}')">Send to chairing screen</button>`:""}</div>`);
+  const rm=document.getElementById("rMain"),rc=document.getElementById("rCo"),rcom=document.getElementById("rCom");
+  if(rm&&rc){syncSubmitterExclusion(rm,rc);rm.onchange=()=>syncSubmitterExclusion(rm,rc);rc.onchange=()=>syncSubmitterExclusion(rc,rm);}
+  if(rcom)rcom.onchange=()=>refreshResolutionSubmitters(rcom.value);
+}
+function refreshResolutionSubmitters(committeeId){
+  const main=document.getElementById("rMain"),co=document.getElementById("rCo");
+  if(!main||!co)return;
+  const ds=state.data.delegates.filter(d=>d.committee===committeeId);
+  const opts=ds.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");
+  main.innerHTML=opts;co.innerHTML=opts;syncSubmitterExclusion(main,co);
+  main.onchange=()=>syncSubmitterExclusion(main,co);co.onchange=()=>syncSubmitterExclusion(co,main);
+}
 function selectedValues(id){return [...document.getElementById(id).selectedOptions].map(o=>o.value)}
-function saveResolution(id){const title=document.getElementById("rTitle").value.trim(),committeeId=document.getElementById("rCom").value,main=selectedValues("rMain"),co=selectedValues("rCo"),clauses=document.getElementById("rClauses").value.trim();const existing=state.data.resolutions.find(r=>r.id===id)||{};if(!title||!committeeId||!main.length||(!clauses&&!existing.fileName))return alert("Title, committee, at least one main submitter and a resolution paper are required.");const obj={...existing,id:id||uid(),title,committee:committeeId,main,co,clauses,status:id?(existing.status||"Submitted") :"Submitted",submittedAt:existing.submittedAt||Date.now()};const i=state.data.resolutions.findIndex(r=>r.id===id);i>=0?state.data.resolutions[i]=obj:state.data.resolutions.push(obj);save();closeModal();render()}
+function saveResolution(id){
+  const title=document.getElementById("rTitle").value.trim(),committeeId=document.getElementById("rCom").value;
+  const mainIds=selectedValues("rMain"),coIds=selectedValues("rCo"),clauses=document.getElementById("rClauses").value.trim();
+  const existing=state.data.resolutions.find(r=>r.id===id)||{};
+  const main=resolveSubmitterSelection(mainIds,existing.main),co=resolveSubmitterSelection(coIds,existing.co);
+  const overlap=new Set(main.filter(x=>co.includes(x)));
+  if(!title||!committeeId||!main.length||(!clauses&&!existing.fileName))return alert("Title, committee, at least one main submitter and a resolution paper are required.");
+  if(overlap.size)return alert("A delegate cannot be both a main submitter and a co-submitter.");
+  const obj={...existing,id:id||uid(),title,committee:committeeId,main,co,clauses,status:id?(existing.status||"Submitted"):"Submitted",submittedAt:existing.submittedAt||Date.now()};
+  const i=state.data.resolutions.findIndex(r=>r.id===id);i>=0?state.data.resolutions[i]=obj:state.data.resolutions.push(obj);save();closeModal();render();
+}
 function approveResolution(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return;r.status="Approved by SG";save();closeModal();render()}
 function setResolutionScreen(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return;state.data.screen={committeeId:r.committee,speaker:"Resolution Paper",topic:r.title,mode:"Resolution for review",timer:"",resolutionId:r.id,updated:Date.now()};r.status="On chairing screen";save();closeModal();go("screen")}
 function screenPage(){const s=state.data.screen,c=committee(s.committeeId),r=state.data.resolutions.find(x=>x.id===s.resolutionId);const total=Number(s.timerSeconds)||0;const mins=Math.floor(total/60),secs=total%60;return `<div class="live-header"><div><span class="live-kicker">CHAIRING PANEL DISPLAY</span><h3>${esc(c?.name||"No committee selected")}</h3></div><div class="updated">Changes publish when you press Update connected screen</div></div><div class="live-grid"><div class="live-card"><div class="live-card-head"><strong>Current item</strong><span class="status in-session">LIVE</span></div><div class="speaker-card"><div class="big-timer" id="chairLiveTimer">${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}</div><strong>${esc(s.speaker||"Awaiting chair input")}</strong><span>${esc(s.topic||"No topic set")}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Committee</strong></div><div class="live-mode">${esc(c?.fullName||"Select a committee")}</div><div class="timer">${esc(c?.room||"—")}</div><div class="live-meta"><span>President / Deputy / Chair</span><span>${c?state.data.staff.filter(x=>x.committee===c.id&&["President","Deputy President","Chair"].includes(x.role)).length+" / 3":"—"}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Resolution on display</strong></div><div class="live-mode">${r?esc(r.title):"None"}</div><div class="timer">${r?esc(r.status):"—"}</div><div class="live-meta"><span>Main</span><span>${r?(r.main||[]).length:"0"}</span></div></div></div><div class="panel"><div class="panel-head"><div><h3>Chair controls</h3><p>Enter the speaker and topic, then control the timer with numeric minute/second fields and buttons.</p></div></div><div class="modal-body">${selectField("Committee","screenCom",`<option value="">Select committee</option>`+state.data.committees.map(x=>`<option value="${x.id}" ${s.committeeId===x.id?"selected":""}>${esc(x.name)}</option>`).join(""))}${formField("Speaker / item","screenSpeaker",`type="text" value="${esc(s.speaker||"")}" autocomplete="off"`)}${formField("Topic","screenTopic",`type="text" value="${esc(s.topic||"")}" autocomplete="off"`)}${selectField("Motion / caucus type","screenMode",`<option value="">Select type</option><option value="Moderated Caucus" ${s.mode==="Moderated Caucus"?"selected":""}>Moderated Caucus</option><option value="Unmoderated Caucus" ${s.mode==="Unmoderated Caucus"?"selected":""}>Unmoderated Caucus</option><option value="General Speakers List" ${s.mode==="General Speakers List"?"selected":""}>General Speakers List</option><option value="Voting" ${s.mode==="Voting"?"selected":""}>Voting</option><option value="Other" ${s.mode==="Other"?"selected":""}>Other</option>`)}${formField("Current motion","screenMotion",`type="text" value="${esc(s.motion||"")}" placeholder="e.g. Motion for a 10-minute moderated caucus" autocomplete="off"`)}<div class="timer-input-grid"><div><label class="form-label">Minutes</label><input id="screenMinutes" class="form-input" type="number" min="0" max="999" step="1" value="${mins}"></div><div><label class="form-label">Seconds</label><input id="screenSeconds" class="form-input" type="number" min="0" max="59" step="1" value="${secs}"></div></div><div class="settings-actions timer-actions"><button class="primary" type="button" onclick="startScreenTimer()">Start</button><button class="secondary" type="button" onclick="pauseScreenTimer()">Pause</button><button class="secondary" type="button" onclick="resetScreenTimer()">Reset</button><button class="secondary" type="button" onclick="setScreenTimerFromFields()">Set timer</button></div><button class="primary full" onclick="updateScreen()">Update connected screen</button><button class="secondary full" onclick="openScreenWindow()">Open projector / screen window</button>${r?`<div class="panel" style="margin-top:18px"><div class="panel-head"><div><h3>${esc(r.title)}</h3><p>${esc(r.status)}</p></div></div><div class="modal-body"><p class="muted">${esc(r.clauses)}</p><p><strong>Main submitters:</strong> ${(r.main||[]).map(esc).join(", ")||"—"}</p><p><strong>Co-submitters:</strong> ${(r.co||[]).map(esc).join(", ")||"—"}</p></div></div>`:""}</div></div>`}
@@ -900,7 +953,7 @@ function hhhRoleCommittees(){
 }
 function hhhRoleCommittee(){return hhhRoleCommittees()[0]||null}
 function canAccessCommitteeGrading(cid){
-  if(["logistics","sg","training","advisory"].includes(state.role))return true;
+  if(["logistics","sg","training","rapporteur","advisory"].includes(state.role))return true;
   if(["president","deputy","chair"].includes(state.role))return hhhRoleCommittees().includes(cid);
   return false;
 }
