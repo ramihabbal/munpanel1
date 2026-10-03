@@ -99,9 +99,30 @@ function mergeArrayThreeWay(base, local, remote){
   }
   return out;
 }
+const DATA_ARRAY_KEYS=['committees','countries','staff','delegates','resolutions','resources','grades','financeEntries','logisticsRequests','notifications'];
+function normalizeArrayValue(value){
+  if(Array.isArray(value)) return value;
+  if(value && typeof value === "object") return Object.values(value);
+  return [];
+}
+function normalizeConferenceData(raw){
+  const d={...structuredClone(defaults),...(raw&&typeof raw==="object"?raw:{})};
+  DATA_ARRAY_KEYS.forEach(k=>{d[k]=normalizeArrayValue(d[k]);});
+  d.committees=d.committees.map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));
+  d.financeEntries=d.financeEntries.filter(e=>e&&typeof e==="object").map(e=>({
+    ...e,
+    id:e.id||uid(),
+    item:String(e.item??e.name??""),
+    category:String(e.category??""),
+    price:Number.isFinite(Number(e.price))?Number(e.price):0,
+    notes:String(e.notes??"")
+  }));
+  return d;
+}
 function mergeConferenceState(base,local,remote){
+  base=normalizeConferenceData(base); local=normalizeConferenceData(local); remote=normalizeConferenceData(remote);
   const out={...cloneData(remote)};
-  const arrayKeys=['committees','countries','staff','delegates','resolutions','resources','grades','logisticsRequests','notifications'];
+  const arrayKeys=DATA_ARRAY_KEYS;
   for(const k of arrayKeys) out[k]=mergeArrayThreeWay(base?.[k],local?.[k],remote?.[k]);
   const bScreen=base?.screen||{}, lScreen=local?.screen||{}, rScreen=remote?.screen||{};
   out.screen=sameJSON(lScreen,bScreen)?cloneData(rScreen):cloneData(lScreen);
@@ -118,7 +139,7 @@ async function pullRemoteState(){
     if(error) throw error;
     remoteReady=true; remoteError="";
     if(data?.data && Object.keys(data.data).length){
-      state.data={...structuredClone(defaults),...data.data};
+      state.data=normalizeConferenceData(data.data);
       lastRemoteSnapshot=cloneData(state.data);
       localDirty=false;
       saveLocalOnly();
@@ -149,15 +170,15 @@ function renderRemoteStatus(){
   const el=document.getElementById("remoteStatus");
   if(el) el.textContent=remoteReady?"Shared storage connected":"Shared storage not connected";
 }
-function saveLocalOnly(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state.data))}catch(e){}}
+function saveLocalOnly(){try{state.data=normalizeConferenceData(state.data);localStorage.setItem(STORAGE_KEY,JSON.stringify(state.data))}catch(e){}}
 async function pushRemoteState(){
   if(!remoteReady)return;
   try{
     const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
     if(error)throw error;
-    const remote=data?.data&&Object.keys(data.data).length?data.data:defaults;
+    const remote=normalizeConferenceData(data?.data&&Object.keys(data.data).length?data.data:defaults);
     const merged=mergeConferenceState(lastRemoteSnapshot||remote,state.data,remote);
-    state.data={...structuredClone(defaults),...merged};
+    state.data=normalizeConferenceData(merged);
     const {error:upsertError}=await supabaseClient.from("conference_state").upsert({id:"main",data:state.data,updated_at:new Date().toISOString()},{onConflict:"id"});
     if(upsertError)throw upsertError;
     lastRemoteSnapshot=cloneData(state.data);
@@ -238,7 +259,7 @@ window.roles={
 };
 const passWords=["Cedar","Orbit","Maple","Harbor","Quartz","Atlas","Lantern","Signal","Raven","Vector","Summit","Comet","Pine","Marble","Copper","Lunar"];
 function generateCommitteePassword(){const a=passWords[Math.floor(Math.random()*passWords.length)],b=passWords[Math.floor(Math.random()*passWords.length)],n=Math.floor(10+Math.random()*90);return `${a}!${b}${n}`;}
-function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=(d.committees||[]).map(c=>({...c,gradingPassword:c.gradingPassword||generateCommitteePassword()}));d.financeEntries=Array.isArray(d.financeEntries)?d.financeEntries:[];return d}catch{return structuredClone(defaults)}}
+function loadData(){try{return normalizeConferenceData(JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}"))}catch{return normalizeConferenceData(defaults)}}
 const state={role:null,page:"overview",data:loadData(),gradingCommittee:"",assignedCommittee:""};
 setTimeout(()=>{pullRemoteState().then(()=>updateLoginCommitteeOptions()).catch(()=>{});startRemoteSync()},0);
 function save(){saveLocalOnly();scheduleRemoteSave();}
@@ -612,9 +633,20 @@ function saveFinanceEntry(id=""){
   if(!Array.isArray(state.data.financeEntries))state.data.financeEntries=[];
   if(id){const e=state.data.financeEntries.find(x=>x.id===id);if(e)Object.assign(e,{item,category,price,notes,updatedAt:Date.now()});}
   else state.data.financeEntries.push({id:uid(),item,category,price,notes,createdAt:Date.now(),updatedAt:Date.now()});
-  save();closeModal();render();
+  saveLocalOnly();
+  localDirty=true;
+  closeModal();
+  render();
+  ensureRemoteReady().then(ok=>{if(ok&&remoteReady)return pushRemoteState();}).catch(e=>console.warn("Finance save failed",e));
 }
-function removeFinanceEntry(id){if(!confirm("Delete this finance entry?"))return;state.data.financeEntries=(state.data.financeEntries||[]).filter(e=>e.id!==id);save();render();}
+function removeFinanceEntry(id){
+  if(!confirm("Delete this finance entry?"))return;
+  state.data.financeEntries=(state.data.financeEntries||[]).filter(e=>e.id!==id);
+  saveLocalOnly();
+  localDirty=true;
+  render();
+  ensureRemoteReady().then(ok=>{if(ok&&remoteReady)return pushRemoteState();}).catch(e=>console.warn("Finance delete failed",e));
+}
 
 function openResource(){modal("Upload conference resource",`${formField("Title","resTitle",`placeholder="e.g. UNODC Background Guide"`)}${selectField("Committee (optional)","resCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Description</label><textarea id="resDesc" class="form-input" rows="4" placeholder="What is this file for?"></textarea><label class="form-label">File</label><input id="resFile" class="form-input" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx" onchange="showResourceFile(this)"><div id="resFileInfo" class="muted" style="margin-top:7px">PDF, DOC, DOCX, PPT or PPTX · maximum 30 MB</div><button class="primary full" onclick="saveResource()">Upload resource</button>`)}
 function showResourceFile(input){const f=input.files?.[0],box=document.getElementById("resFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>30*1024*1024){box.textContent="File is too large. Maximum size is 30 MB.";input.value=""}}
