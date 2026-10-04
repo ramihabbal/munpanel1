@@ -65,6 +65,7 @@
         <option value="finance">Head of Finance</option>
         <option value="training">Head of Training</option>
         <option value="rapporteur">Head of Rapporteurs</option>
+        <option value="globalvillage">Head of Global Village</option>
         <option value="advisory">Advisory Panel</option>
         <option value="chair">Chair</option>
         <option value="delegate">Delegate</option>
@@ -247,7 +248,7 @@ function restartScreenQueue(){
 }
 function mergeConferenceState(base,local,remote){
   const out={...cloneData(remote)};
-  const arrayKeys=['committees','countries','staff','delegates','resolutions','resources','grades','gradingSystems','logisticsRequests','notifications','tasks','auditLog','conferenceEvents'];
+  const arrayKeys=['committees','countries','staff','delegates','resolutions','resources','grades','gradingSystems','financeEntries','logisticsRequests','notifications','tasks','auditLog','conferenceEvents'];
   for(const k of arrayKeys) out[k]=mergeArrayThreeWay(base?.[k],local?.[k],remote?.[k]);
   const bScreen=base?.screen||{}, lScreen=local?.screen||{}, rScreen=remote?.screen||{};
   out.screen=sameJSON(lScreen,bScreen)?cloneData(rScreen):cloneData(lScreen);
@@ -272,6 +273,7 @@ async function pullRemoteState(){
     if(data?.data && Object.keys(data.data).length){
       state.data={...structuredClone(defaults),...data.data};
       state.data.committees=ensureUniqueCommitteePasswords(state.data.committees||[]);
+      state.data.financeEntries=normalizeFinanceEntries(state.data.financeEntries);
       state.data.screenStates=normalizeScreenStates(state.data.screenStates);
       initializeConferenceFeatures();
       lastRemoteSnapshot=cloneData(state.data);
@@ -379,6 +381,7 @@ const loginPasswords={
   finance:"Maple#Signal74",
   training:"Raven!Bridge26",
   rapporteur:"Pine@Vector85",
+  globalvillage:"Global@Village68",
   advisory:"Summit@Advisory52",
   chair:"Orbit#Cedar39",
   delegate:"Lunar!Maple62"
@@ -389,8 +392,57 @@ window.roles={
   sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
   logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"],["settings","Settings"]]},
   finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
-  training:{label:"Head of Training",name:"Head of Training",avatar:"HT",pages:[["overview","Overview"],["training","Training"],["grading","Grading"],["resources","Resources"]]},
-  rapporteur:{label:"Head of Rapporteurs",name:"Head of Rapporteurs",avatar:"HR",pages:[["overview","Overview"],["rapporteur","Rapporteurs"],["resources","Resources"]]},
+  // Head of Training
+  training:{
+    label:"Head of Training",
+    name:"Head of Training",
+    avatar:"HT",
+    pages:[
+      ["overview","Overview"],
+      ["committees","Committees"],
+      ["countries","Countries"],
+      ["staff","Staff & Dais"],
+      ["delegates","Delegates"],
+      ["resolutions","Resolution Papers"],
+      ["grading","Grading"],
+      ["training","Training"],
+      ["resources","Resources"],
+      ["notifications","Notifications"],
+      ["tasks","Tasks"],
+      ["timeline","Conference Timeline"]
+    ]
+  },
+  // Head of Rapporteurs
+  rapporteur:{
+    label:"Head of Rapporteurs",
+    name:"Head of Rapporteurs",
+    avatar:"HR",
+    pages:[
+      ["overview","Overview"],
+      ["committees","Committees"],
+      ["countries","Countries"],
+      ["staff","Staff & Dais"],
+      ["delegates","Delegates"],
+      ["resolutions","Resolution Papers"],
+      ["grading","Grading"],
+      ["rapporteur","Rapporteurs"],
+      ["resources","Resources"],
+      ["notifications","Notifications"],
+      ["tasks","Tasks"],
+      ["timeline","Conference Timeline"]
+    ]
+  },
+
+  // Head of Global Village
+  globalvillage:{
+    label:"Head of Global Village",
+    name:"Head of Global Village",
+    avatar:"GV",
+    pages:[
+      ["logisticsRequests","Logistics Requests"],
+      ["notifications","Notifications"]
+    ]
+  },
   advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
   chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
   delegate:{label:"Delegate",name:"Delegate",avatar:"D",pages:[["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["resources","Resources"]]}
@@ -415,7 +467,12 @@ function ensureUniqueCommitteePasswords(committees){
     return out;
   });
 }
-function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=ensureUniqueCommitteePasswords(d.committees||[]);d.financeEntries=Array.isArray(d.financeEntries)?d.financeEntries:[];return d}catch{return structuredClone(defaults)}}
+function normalizeFinanceEntries(value){
+  if(Array.isArray(value))return value;
+  if(value&&typeof value==="object")return Object.entries(value).map(([id,e])=>({...e,id:e?.id||id})).filter(e=>e&&typeof e==="object");
+  return [];
+}
+function loadData(){try{const d={...defaults,...JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")} ;d.committees=ensureUniqueCommitteePasswords(d.committees||[]);d.financeEntries=normalizeFinanceEntries(d.financeEntries);return d}catch{return structuredClone(defaults)}}
 function committeeLoginPassword(id){const c=committee(id);return c?.gradingPassword||"";}
 const state={role:null,page:"overview",data:loadData(),gradingCommittee:"",assignedCommittee:""};
 setTimeout(()=>{pullRemoteState().then(()=>updateLoginCommitteeOptions()).catch(()=>{});startRemoteSync()},0);
@@ -543,6 +600,7 @@ function go(p){
 }
 function notificationRecipientMatches(n){
   if(!n || n.type!=="leadership") return false;
+  if(["rapporteur","training","globalvillage"].includes(state.role)) return true;
   if(!["president","deputy","chair"].includes(state.role)) return false;
   const targetCommittee=String(n.committee||"");
   return !targetCommittee || targetCommittee===currentUserCommitteeId();
@@ -581,7 +639,7 @@ function sendLeadershipNotification(){
   save(); closeModal(); renderShell(); render();
   alert("Notification sent to the Dais.");
 }
-function render(){const titles={overview:["Overview","Conference overview"],committees:["Committees","Committee management"],countries:["Countries","Country registry"],staff:["Staff & Dais","Presidents, deputies, chairs and conference staff"],delegates:["Delegates","Delegate assignments"],resolutions:["Resolution Papers","Main and co-submitter workflow"],grading:["Grading","Committee grading system"],screen:["Chairing Screen","Live chairing panel display"],mycommittee:["My Committee","Committee control panel"],delegatePortal:["Delegate Portal","Delegate resolution paper submission"],myResolutions:["My Resolution Papers","Submitted resolution papers"],finance:["Finance","Finance department"],training:["Training","Training department"],rapporteur:["Rapporteurs","Rapporteur department"],resources:["Conference Resources","Background guides and conference files"],logisticsRequests:["Logistics Requests","Committee supply requests and notifications"],notifications:["Notifications","Messages from conference leadership"],settings:["Data & settings","Local conference data"],tasks:["Tasks","Committee and conference task management"],timeline:["Committee Timeline","Live committee event timeline"],audit:["Activity Log","Conference activity and audit trail"]};const t=titles[state.page]||titles.overview;document.getElementById("pageName").textContent=t[0];document.getElementById("pageTitle").textContent=t[1];const pageRenderer=Object.prototype.hasOwnProperty.call(pages,state.page)?pages[state.page]:pages.overview;try{document.getElementById("content").innerHTML=pageRenderer();if(notificationUnreadCount()&&state.page!=="notifications"){document.getElementById("content").insertAdjacentHTML("afterbegin",`<div class="panel notification-banner"><div><strong>You have ${notificationUnreadCount()} unread Dais notification${notificationUnreadCount()===1?"":"s"}.</strong><p>Conference leadership sent you a message.</p></div><button class="primary" onclick="go(\'notifications\')">Open notifications</button></div>`)} }catch(err){console.error("Page render failed:",state.page,err);document.getElementById("content").innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Page error</h3><p>The ${esc(t[0])} page could not be rendered.</p></div></div><pre style="white-space:pre-wrap;color:#b91c1c">${esc(err?.message||String(err))}</pre></div>`;}renderRemoteStatus();if(state.page==="delegatePortal"){populateDelegateSubmitters();const dc=document.getElementById("dpCom");if(dc)dc.onchange=populateDelegateSubmitters}}
+function render(){const titles={overview:["Overview","Conference overview"],committees:["Committees","Committee management"],countries:["Countries","Country registry"],staff:["Staff & Dais","Presidents, deputies, chairs and conference staff"],delegates:["Delegates","Delegate assignments"],resolutions:["Resolution Papers","Main and co-submitter workflow"],grading:["Grading","Committee grading system"],screen:["Chairing Screen","Live chairing panel display"],mycommittee:["My Committee","Committee control panel"],delegatePortal:["Delegate Portal","Delegate resolution paper submission"],myResolutions:["My Resolution Papers","Submitted resolution papers"],finance:["Finance","Finance department"],training:["Training","Training department"],rapporteur:["Rapporteurs","Rapporteur department"],resources:["Conference Resources","Background guides and conference files"],logisticsRequests:["Logistics Requests","Committee supply requests and notifications"],notifications:["Notifications","Messages from conference leadership"],settings:["Data & settings","Local conference data"],tasks:["Tasks","Committee and conference task management"],timeline:["Committee Timeline","Live committee event timeline"],audit:["Activity Log","Conference activity and audit trail"]};const t=titles[state.page]||titles.overview;document.getElementById("pageName").textContent=t[0];document.getElementById("pageTitle").textContent=t[1];const pageRenderer=Object.prototype.hasOwnProperty.call(pages,state.page)?pages[state.page]:pages.overview;try{document.getElementById("content").innerHTML=pageRenderer();if(notificationUnreadCount()&&state.page!=="notifications"){document.getElementById("content").insertAdjacentHTML("afterbegin",`<div class="panel notification-banner"><div><strong>You have ${notificationUnreadCount()} unread notification${notificationUnreadCount()===1?"":"s"}.</strong><p>Conference leadership sent you a message.</p></div><button class="primary" onclick="go(\'notifications\')">Open notifications</button></div>`)} }catch(err){console.error("Page render failed:",state.page,err);document.getElementById("content").innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Page error</h3><p>The ${esc(t[0])} page could not be rendered.</p></div></div><pre style="white-space:pre-wrap;color:#b91c1c">${esc(err?.message||String(err))}</pre></div>`;}renderRemoteStatus();if(state.page==="delegatePortal"){populateDelegateSubmitters();const dc=document.getElementById("dpCom");if(dc)dc.onchange=populateDelegateSubmitters}}
 function empty(title,text){return `<div class="empty-state"><strong>${title}</strong><p>${text}</p></div>`}
 function modal(title,body){document.getElementById("modal")?.remove();document.body.insertAdjacentHTML("beforeend",`<div id="modal" class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="panel-head"><h3>${title}</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">${body}</div></div></div>`)}
 function closeModal(){document.getElementById("modal")?.remove()}
@@ -596,7 +654,7 @@ const roles=window.roles;
 function esc(value){return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,9);}
 function committee(id){return state.data.committees.find(c=>c.id===id);}
-function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","advisory","chair"].includes(state.role);}
+function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","globalvillage","advisory","chair"].includes(state.role);}
 function canManage(){return ["president","deputy","sg","logistics","advisory","chair"].includes(state.role);}
 function isCommitteeDaisRole(){return ["president","deputy","chair"].includes(state.role);}
 function currentUserCommitteeId(){return isCommitteeDaisRole()?String(state.assignedCommittee||""):"";}
@@ -651,12 +709,24 @@ const pages={
  mycommittee:()=>{const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name)||state.data.staff.find(s=>s.role==="Chair");return mine?committeePanel(mine.committee):empty("No committee assigned","Your Chair account has not been assigned to a committee yet.")},
   delegatePortal:()=>`<div class="permission-banner"><div><strong>Delegate resolution portal</strong><p>Upload your resolution paper as a PDF or Word document. Select the main submitters and co-submitters. The paper is routed to the Secretary-General and assigned chairing panel.</p></div><span>UPLOAD → SG → CHAIR</span></div><div class="panel"><div class="panel-head"><div><h3>New resolution paper</h3><p>Accepted formats: PDF, DOC, DOCX · Maximum size: 20 MB.</p></div></div><div class="modal-body">${formField("Resolution title","dpTitle",`placeholder="Draft resolution title"`)}${selectField("Committee","dpCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="dpMain" class="form-input" multiple size="5"></select><label class="form-label">Co-submitters</label><select id="dpCo" class="form-input" multiple size="6"></select><label class="form-label">Resolution paper file</label><input id="dpFile" class="form-input file-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="showSelectedFile(this)"><div id="dpFileInfo" class="file-info">No file selected.</div><button class="primary full" onclick="submitDelegateResolution()">Upload and submit to SG and Chairing Panel</button></div></div>`,
   myResolutions:()=>{const mine=state.data.resolutions;return `<div class="panel"><div class="panel-head"><div><h3>My resolution papers</h3><p>Submission status and routing.</p></div></div>${mine.length?mine.map(r=>`<div class="queue"><b>§</b><span><strong>${esc(r.title)}</strong><small>${esc(committee(r.committee)?.name||"")} · ${(r.main||[]).join(", ")}${r.fileName?` · <button class="text-btn" onclick="downloadResolutionFile('${r.id}')">Download ${esc(r.fileName)}</button>`:""}</small></span><span class="award">${esc(r.status)}</span></div>`).join(""):empty("No papers submitted","Your submitted papers will appear here.")}</div>`},
-  finance:()=>{const entries=state.data.financeEntries||[];const total=entries.reduce((a,e)=>a+(Number(e.price)||0),0);return `<div class="metric-grid">${metric("Total expenses",total.toFixed(2),"Conference spending")}${metric("Entries",entries.length,"Recorded expenses")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates paid",`${state.data.delegates.filter(d=>d.paid).length} / ${state.data.delegates.length}`,"Payment checklist")}</div>${paymentChecklistHtml()}<div class="panel"><div class="panel-head"><div><h3>Finance department</h3><p>Record conference expenses and their prices. Changes are saved when you press Save.</p></div><button class="primary" onclick="openFinanceEntry()">+ Add expense</button></div>${entries.length?`<div class="table-panel"><table><thead><tr><th>Item / expense</th><th>Category</th><th>Price</th><th>Notes</th><th></th></tr></thead><tbody>${entries.map(e=>`<tr><td><strong>${esc(e.item)}</strong></td><td>${esc(e.category||"—")}</td><td>${Number(e.price||0).toFixed(2)}</td><td>${esc(e.notes||"—")}</td><td><button class="row-btn" onclick="openFinanceEntry('${e.id}')">Edit</button> <button class="row-btn danger" onclick="removeFinanceEntry('${e.id}')">Delete</button></td></tr>`).join("")}</tbody></table></div>`:empty("No finance entries","Add an expense to start tracking conference spending.")}<div class="settings-actions"><button class="secondary" onclick="exportData()">Export conference data</button></div></div>`},
+  finance:()=>{const entries=normalizeFinanceEntries(state.data.financeEntries);state.data.financeEntries=entries;const total=entries.reduce((a,e)=>a+(Number(e.price)||0),0);return `<div class="metric-grid">${metric("Total expenses",total.toFixed(2),"Conference spending")}${metric("Entries",entries.length,"Recorded expenses")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates paid",`${state.data.delegates.filter(d=>d.paid).length} / ${state.data.delegates.length}`,"Payment checklist")}</div>${paymentChecklistHtml()}<div class="panel"><div class="panel-head"><div><h3>Finance department</h3><p>Record conference expenses and their prices. Changes are saved when you press Save.</p></div><button class="primary" onclick="openFinanceEntry()">+ Add expense</button></div>${entries.length?`<div class="table-panel"><table><thead><tr><th>Item / expense</th><th>Category</th><th>Price</th><th>Notes</th><th></th></tr></thead><tbody>${entries.map(e=>`<tr><td><strong>${esc(e.item)}</strong></td><td>${esc(e.category||"—")}</td><td>${Number(e.price||0).toFixed(2)}</td><td>${esc(e.notes||"—")}</td><td><button class="row-btn" onclick="openFinanceEntry('${e.id}')">Edit</button> <button class="row-btn danger" onclick="removeFinanceEntry('${e.id}')">Delete</button></td></tr>`).join("")}</tbody></table></div>`:empty("No finance entries","Add an expense to start tracking conference spending.")}<div class="settings-actions"><button class="secondary" onclick="exportData()">Export conference data</button></div></div>`},
   training:()=>`<div class="metric-grid">${metric("Committees",state.data.committees.length,"Training coverage")}${metric("Chairs",state.data.staff.filter(s=>s.role==="Chair").length,"Assigned")}${metric("Deputy Presidents",state.data.staff.filter(s=>s.role==="Deputy President").length,"Assigned")}${metric("Presidents",state.data.staff.filter(s=>s.role==="President").length,"Assigned")}</div><div class="panel"><div class="panel-head"><div><h3>Training department</h3><p>Manage training through the staff and dais assignments.</p></div><button class="primary" onclick="go('staff')">Open staff & dais</button></div></div>`,
   rapporteur:()=>`<div class="metric-grid">${metric("Resolution papers",state.data.resolutions.length,"Received")}${metric("On chairing screen",state.data.resolutions.filter(r=>r.status==="On chairing screen").length,"Live")}${metric("Committees",state.data.committees.length,"Configured")}${metric("Delegates",state.data.delegates.length,"Registered")}</div><div class="panel"><div class="panel-head"><div><h3>Rapporteur department</h3><p>Track resolution papers and committee routing.</p></div><button class="primary" onclick="go('resolutions')">Open papers</button></div></div>`,
 
  resources:()=>{const canUpload=isStaff();const rs=isCommitteeDaisRole()?(state.data.resources||[]).filter(r=>!r.committee||r.committee===currentUserCommitteeId()):(state.data.resources||[]);return `<div class="toolbar"><div class="search">⌕ <input oninput="filterCards(this.value,'resourceGrid')" placeholder="Search resources..."></div>${canUpload?`<button class="primary" onclick="openResource()">+ Upload resource</button>`:""}</div><div class="panel"><div class="panel-head"><div><h3>Conference resources</h3><p>Background guides, study guides, rules, training material and other official files.</p></div></div>${rs.length?`<div id="resourceGrid" class="doc-grid">${rs.map(r=>{const c=committee(r.committee);return `<div class="doc resource-card"><div class="doc-type">${esc((r.fileType||"FILE").split("/").pop().toUpperCase())}</div><strong>${esc(r.title)}</strong><span>${esc(r.fileName)}${c?` · ${esc(c.name)}`:" · Conference-wide"}</span><small>${esc(r.description||"No description")}</small><button class="text-btn" onclick="downloadResourceFile('${r.id}')">Download</button>${canUpload?` <button class="row-btn" onclick="removeResource('${r.id}')">Remove</button>`:""}</div>`}).join("")}</div>`:empty("No resources uploaded","Staff and Dais members can upload official background guides and other conference files here.")}</div>`},
-logisticsRequests:()=>{const all=state.data.logisticsRequests||[];const canSubmit=["president","chair"].includes(state.role);const canManage=state.role==="logistics";const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);let visible=all;if(isCommitteeDaisRole())visible=all.filter(r=>r.committee===currentUserCommitteeId());return `<div class="toolbar">${canSubmit?`<button class="primary" onclick="openLogisticsRequest()">+ New logistics request</button>`:""}${canManage?`<button class="secondary" onclick="markAllLogisticsRead()">Mark notifications read</button>`:""}</div><div class="metric-grid">${metric("Requests",visible.length,"Submitted")}${metric("Pending",visible.filter(r=>r.status==="Pending").length,"Awaiting fulfillment")}${metric("Reusable",visible.filter(r=>r.reusable).length,"Return required")}${metric("Committees",new Set(visible.map(r=>r.committee)).size,"Requesting")}</div><div class="panel"><div class="panel-head"><div><h3>${canManage?"Logistics request inbox":"Committee logistics requests"}</h3><p>${canManage?"Requests submitted by Presidents and Dais appear here with their committee, item, amount and colour.":"Submit materials needed for committee decoration and setup."}</p></div></div>${visible.length?`<div class="logistics-request-list">${visible.slice().sort((a,b)=>b.createdAt-a.createdAt).map(r=>`<div class="logistics-request"><div><strong>${esc(committee(r.committee)?.name||"Unknown committee")}</strong><span>${esc(r.item)} · ${r.amount}${r.color?` · ${esc(r.color)}`:""}${r.reusable?` · <b>Reusable — return required</b>`:""}</span><small>${new Date(r.createdAt).toLocaleString()} · ${esc(r.requestedBy||"Committee")}</small></div><span class="status ${r.status==="Fulfilled"?"in-session":"break"}">${r.status}</span>${canManage?`<button class="row-btn" onclick="fulfillLogisticsRequest('${r.id}')">${r.status==="Fulfilled"?"Mark pending":"Mark fulfilled"}</button>`:""}</div>`).join("")}</div>`:empty("No logistics requests","No requests have been submitted yet.")}</div><div class="panel"><div class="panel-head"><div><h3>Materials terms</h3><p>Reusable materials such as scissors and staplers must be returned. Lost or unreturned reusable materials are subject to replacement costs under Secretariat policy.</p></div></div></div>`},
+logisticsRequests:()=>{
+  const all=state.data.logisticsRequests||[];
+  const isGV=state.role==="globalvillage";
+  const canSubmit=["president","chair","globalvillage"].includes(state.role);
+  const canManage=state.role==="logistics";
+  const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
+  let visible=all;
+  if(isCommitteeDaisRole())visible=all.filter(r=>r.committee===currentUserCommitteeId());
+  if(isGV){
+    return `<div class="permission-banner"><div><strong>Global Village logistics</strong><p>Send a materials and setup request directly to the Head of Logistics. Requests submitted here are not displayed as an inbox.</p></div><span>SEND → HEAD OF LOGISTICS</span></div><div class="panel"><div class="panel-head"><div><h3>Send a logistics request</h3><p>Request supplies, decoration materials, equipment or other items needed for Global Village.</p></div></div><div class="modal-body"><div class="setting" style="margin-bottom:18px"><label>Department</label><strong>Global Village</strong><p>The request will be sent to the Head of Logistics and marked as pending.</p></div><button class="primary full" onclick="openLogisticsRequest()">+ New Global Village logistics request</button></div></div><div class="panel"><div class="panel-head"><div><h3>Materials terms</h3><p>Reusable materials such as scissors and staplers must be returned. Lost or unreturned reusable materials are subject to replacement costs under Secretariat policy.</p></div></div></div>`;
+  }
+  return `<div class="toolbar">${canSubmit?`<button class="primary" onclick="openLogisticsRequest()">+ New logistics request</button>`:""}${canManage?`<button class="secondary" onclick="markAllLogisticsRead()">Mark notifications read</button>`:""}</div><div class="metric-grid">${metric("Requests",visible.length,"Submitted")}${metric("Pending",visible.filter(r=>r.status==="Pending").length,"Awaiting fulfillment")}${metric("Reusable",visible.filter(r=>r.reusable).length,"Return required")}${metric("Committees",new Set(visible.map(r=>r.committee)).size,"Requesting")}</div><div class="panel"><div class="panel-head"><div><h3>${canManage?"Logistics request inbox":"Committee logistics requests"}</h3><p>${canManage?"Requests submitted by Presidents and Dais appear here with their committee, item, amount and colour.":"Submit materials needed for committee decoration and setup."}</p></div></div>${visible.length?`<div class="logistics-request-list">${visible.slice().sort((a,b)=>b.createdAt-a.createdAt).map(r=>`<div class="logistics-request"><div><strong>${esc(r.department||committee(r.committee)?.name||"Unknown committee")}</strong><span>${esc(r.item)} · ${r.amount}${r.color?` · ${esc(r.color)}`:""}${r.reusable?` · <b>Reusable — return required</b>`:""}</span><small>${new Date(r.createdAt).toLocaleString()} · ${esc(r.requestedBy||"Committee")}</small></div><span class="status ${r.status==="Fulfilled"?"in-session":"break"}">${r.status}</span>${canManage?`<button class="row-btn" onclick="fulfillLogisticsRequest('${r.id}')">${r.status==="Fulfilled"?"Mark pending":"Mark fulfilled"}</button>`:""}</div>`).join("")}</div>`:empty("No logistics requests","No requests have been submitted yet.")}</div><div class="panel"><div class="panel-head"><div><h3>Materials terms</h3><p>Reusable materials such as scissors and staplers must be returned. Lost or unreturned reusable materials are subject to replacement costs under Secretariat policy.</p></div></div></div>`;
+},
 notifications:()=>{
   const leadership=["logistics","sg","advisory"].includes(state.role);
   const inbox=(state.data.notifications||[]).filter(n=>notificationRecipientMatches(n)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -682,7 +752,7 @@ function openCommittee(id=""){const x=committee(id)||{};modal(id?"Edit committee
 function saveCommittee(id){const name=document.getElementById("fName").value.trim(),fullName=document.getElementById("fFull").value.trim(),room=document.getElementById("fRoom").value.trim(),type=document.getElementById("fType").value.trim(),description=document.getElementById("fDescription").value.trim();if(!name)return alert("Committee abbreviation is required.");const duplicate=state.data.committees.find(c=>c.name.toLowerCase()===name.toLowerCase()&&c.id!==id);if(duplicate)return alert("A committee with that abbreviation already exists.");const obj={id:id||uid(),name,fullName,room,type,description,gradingPassword:id?(committee(id)?.gradingPassword||generateCommitteePassword()):generateCommitteePassword()};const i=state.data.committees.findIndex(c=>c.id===id);i>=0?state.data.committees[i]=obj:state.data.committees.push(obj);save();closeModal();render()}
 function openCountry(id=""){const x=state.data.countries.find(x=>x.id===id)||{committees:[]};modal(id?"Edit country":"Add country",`${formField("Country name","fCountry",`value="${esc(x.name||"")}"`)}<label class="form-label">Committees where this country is available</label><div class="check-grid">${state.data.committees.length?state.data.committees.map(c=>`<label><input type="checkbox" name="fCom" value="${c.id}" ${(x.committees||[]).includes(c.id)?"checked":""}> ${esc(c.name)}</label>`).join(""):"<span class='muted'>Create committees first.</span>"}</div><button class="primary full" onclick="saveCountry('${id}')">Save country</button>`)}
 function saveCountry(id){const name=document.getElementById("fCountry").value.trim();if(!name)return alert("Country name is required.");const committees=[...document.querySelectorAll('input[name="fCom"]:checked')].map(x=>x.value),obj={id:id||uid(),name,committees};const i=state.data.countries.findIndex(x=>x.id===id);i>=0?state.data.countries[i]=obj:state.data.countries.push(obj);save();closeModal();render()}
-function openStaff(id=""){const x=state.data.staff.find(x=>x.id===id)||{};const rolesList=["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Chair"];modal(id?"Edit staff member":"Add staff member",`${formField("Full name","fStaff",`value="${esc(x.name||"")}"`)}${selectField("Role","fRole",rolesList.map(r=>`<option ${x.role===r?"selected":""}>${r}</option>`).join(""))}${selectField("Committee","fStaffCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveStaff('${id}')">Save staff member</button>`)}
+function openStaff(id=""){const x=state.data.staff.find(x=>x.id===id)||{};const rolesList=["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Head of Global Village","Chair"];modal(id?"Edit staff member":"Add staff member",`${formField("Full name","fStaff",`value="${esc(x.name||"")}"`)}${selectField("Role","fRole",rolesList.map(r=>`<option ${x.role===r?"selected":""}>${r}</option>`).join(""))}${selectField("Committee","fStaffCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveStaff('${id}')">Save staff member</button>`)}
 function saveStaff(id){
  const name=document.getElementById("fStaff").value.trim();
  const role=document.getElementById("fRole").value;
@@ -694,7 +764,7 @@ function saveStaff(id){
    const occupied=state.data.staff.find(s=>s.id!==id&&s.committee===com&&s.role===role);
    if(occupied)return alert(`This committee already has a ${role}.`);
  }
- const conferenceRoles=["Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs"];
+ const conferenceRoles=["Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Head of Global Village"];
  const finalCommittee=conferenceRoles.includes(role)?"":com;
  const obj={id:id||uid(),name,role,committee:finalCommittee,committeeId:finalCommittee};
  const i=state.data.staff.findIndex(x=>x.id===id);
@@ -735,9 +805,10 @@ function openLogisticsRequest(){
  const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
  let committeeId=mine?.committee||"";
  const isPresident=state.role==="president";
+ const isGlobalVillage=state.role==="globalvillage";
  if(isPresident && !committeeId) committeeId="";
  if(state.role==="chair" && !committeeId)return alert("Your Chair account is not assigned to a committee.");
- if(!["chair","president"].includes(state.role))return alert("You do not have permission to submit a committee logistics request.");
+ if(!["chair","president","globalvillage"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
  const items=[
   ["Scissors","reusable"],["Stapler","reusable"],["Cardboard","consumable"],["Sticky notes","consumable"],
   ["Markers","consumable"],["Colored paper","consumable"],["Printer paper","consumable"],["Tape","consumable"],
@@ -748,8 +819,8 @@ function openLogisticsRequest(){
    <input class="form-input lrAmount" data-for="${i}" type="number" min="1" value="1" placeholder="Amount" disabled>
    <input class="form-input lrColor" data-for="${i}" placeholder="Colour (if applicable)" disabled>
  </div>`).join("");
- modal("Committee logistics request",`
-   ${isPresident?`<label class="form-label">Committee</label><select id="lrCommittee" class="form-input">${state.data.committees.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.fullName||"")}</option>`).join("")}</select>`:`<div class="request-committee"><strong>${esc(committee(committeeId)?.name||"Your committee")}</strong><span>${esc(committee(committeeId)?.fullName||"")}</span></div>`}
+ modal(isGlobalVillage?"Global Village logistics request":"Committee logistics request",`
+   ${isGlobalVillage?`<div class="request-committee"><strong>Global Village</strong><span>Conference department</span></div>`:isPresident?`<label class="form-label">Committee</label><select id="lrCommittee" class="form-input">${state.data.committees.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.fullName||"")}</option>`).join("")}</select>`:`<div class="request-committee"><strong>${esc(committee(committeeId)?.name||"Your committee")}</strong><span>${esc(committee(committeeId)?.fullName||"")}</span></div>`}
    <p class="muted">Select everything your committee needs for decoration, setup, or session use. Enter an amount for every selected item. Add a colour when the material can have different colours.</p>
    <div class="logistics-items">${rows}</div>
    <div class="other-request">
@@ -779,9 +850,10 @@ function openLogisticsRequest(){
 }
 function saveLogisticsRequest(){
  const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
- let committeeId=state.role==="president"?(document.getElementById("lrCommittee")?.value||""):(mine?.committee||"");
- if(!committeeId)return alert("Please select a committee.");
- if(!["chair","president"].includes(state.role))return alert("You do not have permission to submit a committee logistics request.");
+ const isGlobalVillage=state.role==="globalvillage";
+ let committeeId=isGlobalVillage?"":state.role==="president"?(document.getElementById("lrCommittee")?.value||""):(mine?.committee||"");
+ if(!committeeId && !isGlobalVillage)return alert("Please select a committee.");
+ if(!["chair","president","globalvillage"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
  if(!document.getElementById("lrAgree").checked)return alert("You must accept the materials receipt and return terms.");
  const requests=[];
  document.querySelectorAll(".lrItemCheck:checked").forEach((check,i)=>{
@@ -804,7 +876,7 @@ function saveLogisticsRequest(){
  const now=Date.now();
  const groupId=uid();
  requests.forEach(r=>{
-   const req={id:uid(),groupId,committee:committeeId,item:r.item,amount:r.amount,color:r.color,reusable:r.reusable,status:"Pending",requestedBy:window.roles[state.role]?.name||"Committee Dais",requestedByRole:state.role,createdAt:now};
+   const req={id:uid(),groupId,committee:committeeId,department:isGlobalVillage?"Global Village":"",item:r.item,amount:r.amount,color:r.color,reusable:r.reusable,status:"Pending",requestedBy:isGlobalVillage?"Head of Global Village":(window.roles[state.role]?.name||"Committee Dais"),requestedByRole:state.role,createdAt:now};
    state.data.logisticsRequests.push(req);
  });
  state.data.notifications.push({
@@ -813,7 +885,7 @@ function saveLogisticsRequest(){
    createdAt:now,read:false
  });
  save();closeModal();go("logisticsRequests");
- alert("Your committee's logistics request has been sent to the Head of Logistics.");
+ alert(isGlobalVillage?"Your Global Village logistics request has been sent to the Head of Logistics.":"Your committee's logistics request has been sent to the Head of Logistics.");
 }
 function markAllLogisticsRead(){if(state.role!=="logistics")return;(state.data.notifications||[]).forEach(n=>{if(n.type==="logistics")n.read=true});save();render()}
 function fulfillLogisticsRequest(id){if(state.role!=="logistics")return;const r=(state.data.logisticsRequests||[]).find(x=>x.id===id);if(!r)return;r.status=r.status==="Fulfilled"?"Pending":"Fulfilled";r.fulfilledAt=r.status==="Fulfilled"?Date.now():null;save();render()}
@@ -972,6 +1044,7 @@ function openFinanceEntry(id=""){
   modal(id?"Edit finance entry":"Add finance expense",`${formField("Expense / item","finItem",`value="${esc(x.item||"")}" placeholder="Venue, printing, badges..."`)}${formField("Category","finCategory",`value="${esc(x.category||"")}" placeholder="Venue, Supplies, Printing..."`)}${formField("Price","finPrice",`type="number" min="0" step="0.01" value="${x.price??""}" placeholder="0.00"`)}<label class="form-label">Notes</label><textarea id="finNotes" class="form-input" rows="3" placeholder="Optional notes">${esc(x.notes||"")}</textarea><button class="primary full" onclick="saveFinanceEntry('${id}')">Save expense</button>`);
 }
 function saveFinanceEntry(id=""){
+  state.data.financeEntries=normalizeFinanceEntries(state.data.financeEntries);
   const item=document.getElementById("finItem")?.value.trim();
   const category=document.getElementById("finCategory")?.value.trim();
   const price=Number(document.getElementById("finPrice")?.value);
@@ -983,7 +1056,7 @@ function saveFinanceEntry(id=""){
   else state.data.financeEntries.push({id:uid(),item,category,price,notes,createdAt:Date.now(),updatedAt:Date.now()});
   save();closeModal();render();
 }
-function removeFinanceEntry(id){if(!confirm("Delete this finance entry?"))return;state.data.financeEntries=(state.data.financeEntries||[]).filter(e=>e.id!==id);save();render();}
+function removeFinanceEntry(id){if(!confirm("Delete this finance entry?"))return;state.data.financeEntries=normalizeFinanceEntries(state.data.financeEntries).filter(e=>e.id!==id);save();render();}
 
 function openResource(){modal("Upload conference resource",`${formField("Title","resTitle",`placeholder="e.g. UNODC Background Guide"`)}${selectField("Committee (optional)","resCom",`<option value="">Conference-wide</option>`+visibleCommittees().map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Description</label><textarea id="resDesc" class="form-input" rows="4" placeholder="What is this file for?"></textarea><label class="form-label">File</label><input id="resFile" class="form-input" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx" onchange="showResourceFile(this)"><div id="resFileInfo" class="muted" style="margin-top:7px">PDF, DOC, DOCX, PPT or PPTX · maximum 30 MB</div><button class="primary full" onclick="saveResource()">Upload resource</button>`)}
 function showResourceFile(input){const f=input.files?.[0],box=document.getElementById("resFileInfo");if(!box)return;if(!f){box.textContent="No file selected.";return}box.textContent=`${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;if(f.size>30*1024*1024){box.textContent="File is too large. Maximum size is 30 MB.";input.value=""}}
@@ -1145,7 +1218,7 @@ function conferenceDashboardPage(){const cs=state.data.committees||[];const atte
 function openTask(id=""){const t=(state.data.tasks||[]).find(x=>x.id===id)||{};const committeeOptions='<option value="">Conference-wide</option>'+state.data.committees.map(c=>`<option value="${esc(c.id)}" ${t.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join("");modal(id?"Edit task":"Assign task",`${formField("Task","taskTitle",`value="${esc(t.title||"")}" placeholder="Prepare committee materials"`)}${formField("Assigned to","taskAssignee",`value="${esc(t.assignee||"")}" placeholder="Name or role"`)}${selectField("Committee","taskCommittee",committeeOptions)}${formField("Deadline","taskDeadline",`type="date" value="${esc(t.deadline||"")}"`)}${selectField("Status","taskStatus",["Pending","In Progress","Completed"].map(x=>`<option ${t.status===x?"selected":""}>${x}</option>`).join(""))}<label class="form-label">Notes</label><textarea id="taskNotes" class="form-input" rows="4">${esc(t.notes||"")}</textarea><button class="primary full" onclick="saveTask('${id}')">Save task</button>`)}
 function saveTask(id=""){const title=document.getElementById("taskTitle")?.value.trim();if(!title)return alert("Task title is required.");const obj={id:id||uid(),title,assignee:document.getElementById("taskAssignee")?.value.trim()||"Unassigned",committee:document.getElementById("taskCommittee")?.value||"",deadline:document.getElementById("taskDeadline")?.value||"",status:document.getElementById("taskStatus")?.value||"Pending",notes:document.getElementById("taskNotes")?.value.trim()||"",createdAt:id?((state.data.tasks||[]).find(x=>x.id===id)?.createdAt||Date.now()):Date.now(),updatedAt:Date.now()};state.data.tasks=state.data.tasks||[];const i=state.data.tasks.findIndex(x=>x.id===obj.id);i>=0?state.data.tasks[i]=obj:state.data.tasks.push(obj);audit("Task saved",title,obj.committee);save();closeModal();render();}
 function updateTaskStatus(id,status){const t=(state.data.tasks||[]).find(x=>x.id===id);if(!t)return;if(isCommitteeDaisRole() && t.committee && t.committee!==currentUserCommitteeId())return alert("You can only update tasks for your committee.");t.status=status;t.updatedAt=Date.now();audit("Task status updated",`${t.title}: ${status}`,t.committee);save();render();}
-function tasksPage(){const leadership=["sg","logistics","advisory"].includes(state.role);let ts=(state.data.tasks||[]);if(isCommitteeDaisRole())ts=ts.filter(t=>!t.committee||t.committee===currentUserCommitteeId());return `<div class="toolbar">${leadership?`<button class="primary" onclick="openTask()">+ Assign task</button>`:""}</div><div class="panel table-panel"><table><thead><tr><th>Task</th><th>Assigned to</th><th>Committee</th><th>Deadline</th><th>Status</th><th></th></tr></thead><tbody>${ts.map(t=>`<tr><td><strong>${esc(t.title)}</strong><small>${esc(t.notes||"")}</small></td><td>${esc(t.assignee||"Unassigned")}</td><td>${esc(committee(t.committee)?.name||"Conference-wide")}</td><td>${esc(t.deadline||"—")}</td><td><span class="status">${esc(t.status||"Pending")}</span></td><td>${leadership?`<button class="row-btn" onclick="openTask('${t.id}')">Edit</button>`:(isCommitteeDaisRole()?`<select class="form-input" onchange="updateTaskStatus('${t.id}',this.value)"><option ${t.status==="Pending"?"selected":""}>Pending</option><option ${t.status==="In Progress"?"selected":""}>In Progress</option><option ${t.status==="Completed"?"selected":""}>Completed</option></select>`:"")}</td></tr>`).join("")}</tbody></table>${!ts.length?empty("No tasks","No tasks are assigned yet."):""}</div>`;}
+function tasksPage(){const leadership=["sg","logistics","rapporteur","advisory"].includes(state.role);let ts=(state.data.tasks||[]);if(isCommitteeDaisRole())ts=ts.filter(t=>!t.committee||t.committee===currentUserCommitteeId());return `<div class="toolbar">${leadership?`<button class="primary" onclick="openTask()">+ Assign task</button>`:""}</div><div class="panel table-panel"><table><thead><tr><th>Task</th><th>Assigned to</th><th>Committee</th><th>Deadline</th><th>Status</th><th></th></tr></thead><tbody>${ts.map(t=>`<tr><td><strong>${esc(t.title)}</strong><small>${esc(t.notes||"")}</small></td><td>${esc(t.assignee||"Unassigned")}</td><td>${esc(committee(t.committee)?.name||"Conference-wide")}</td><td>${esc(t.deadline||"—")}</td><td><span class="status">${esc(t.status||"Pending")}</span></td><td>${leadership?`<button class="row-btn" onclick="openTask('${t.id}')">Edit</button>`:(isCommitteeDaisRole()?`<select class="form-input" onchange="updateTaskStatus('${t.id}',this.value)"><option ${t.status==="Pending"?"selected":""}>Pending</option><option ${t.status==="In Progress"?"selected":""}>In Progress</option><option ${t.status==="Completed"?"selected":""}>Completed</option></select>`:"")}</td></tr>`).join("")}</tbody></table>${!ts.length?empty("No tasks","No tasks are assigned yet."):""}</div>`;}
 function timelineEvents(cid){if(isCommitteeDaisRole())return (state.data.conferenceEvents||[]).filter(e=>e.committee===cid).sort((a,b)=>(a.order??0)-(b.order??0));return (state.data.conferenceEvents||[]).filter(e=>!e.committee||e.committee===cid).sort((a,b)=>(a.order??0)-(b.order??0));}
 function timelinePage(){const cid=currentUserCommitteeId()||"";const events=cid?timelineEvents(cid):(state.data.conferenceEvents||[]).filter(e=>!e.committee).sort((a,b)=>(a.order??0)-(b.order??0));const canEdit=["sg","logistics","advisory"].includes(state.role)||isCommitteeDaisRole();return `<div class="toolbar">${canEdit?`<button class="primary" onclick="openTimelineEvent('','${esc(cid)}')">+ Add timeline event</button>`:""}</div><div class="timeline">${events.map((e,i)=>`<div class="timeline-item"><div class="timeline-dot">${i+1}</div><div class="panel"><div class="panel-head"><div><h3>${esc(e.title)}</h3><p>${esc(e.description||"")}</p></div><span class="status ${e.status==="Completed"?"in-session":"break"}">${esc(e.status||"Pending")}</span></div>${canEdit?`<button class="row-btn" onclick="openTimelineEvent('${e.id}','${esc(cid)}')">Edit</button>`:""}</div></div>`).join("")||empty("No timeline events","Add the committee's event sequence.")}</div>`;}
 function openTimelineEvent(id="",cid=""){const e=(state.data.conferenceEvents||[]).find(x=>x.id===id)||{};const c=e.committee||cid;const committeeOptions=isCommitteeDaisRole()?`<option value="${esc(cid)}" selected>${esc(committee(cid)?.name||cid)}</option>`:`<option value="">Conference-wide</option>`+state.data.committees.map(x=>`<option value="${x.id}" ${c===x.id?"selected":""}>${esc(x.name)}</option>`).join("");modal(id?"Edit timeline event":"Add timeline event",`${formField("Event","eventTitle",`value="${esc(e.title||"")}" placeholder="Opening Ceremony"`)}${selectField("Committee","eventCommittee",committeeOptions)}${formField("Order","eventOrder",`type="number" value="${e.order??((state.data.conferenceEvents||[]).length+1)}"`)}${selectField("Status","eventStatus",["Pending","In Progress","Completed"].map(x=>`<option ${e.status===x?"selected":""}>${x}</option>`).join(""))}<label class="form-label">Description</label><textarea id="eventDescription" class="form-input" rows="3">${esc(e.description||"")}</textarea><button class="primary full" onclick="saveTimelineEvent('${id}')">Save event</button>`)}
@@ -1184,7 +1257,7 @@ en:[{name:"Opening Speech",max:20,criteria:[["Content",5],["Presents Proper Reso
 fr:[{name:"Discours d'ouverture",max:20,criteria:[["Contenu",5],["Présente une résolution convenable à propos le thème",2],["Respecte la position de son pays",3],["Language corporel et ton",3],["Respecte le temps",1],["Capacité de répondre au point d'information",3],["Diplomatie et Communication",2],["Céde le temps",1]]},{name:"Caucus modéré",max:15,criteria:[["Contenu",5],["Présente une résolution convenable à propos du sous-thème",1],["Respecte la position de son pays",2],["Language corporel et ton",1],["Capacité de répondre au point d'information",2],["Diplomatie et Communication",2],["Pertinence et développement de l'argument",2]]},{name:"Caucus immodéré",max:20,criteria:[["Participation et Contribution au sein du bloc",4],["Pertinence et importance du contenu proposé",4],["Collaboration et négociation",4],["Structure propre de la résolution",3],["Diplomatie et Communication",3],["Faisabilité des solutions",2]]},{name:"Présentation des résolutions",max:20,criteria:[["Solution présentée de façon concise et compréhensible",5],["Capacité de répondre au point d'information",5],["Clarté et maîtrise de la résolution",4],["Language corporel et ton",3],["Diplomatie et Communication",3]]},{name:"Discours pour ou contre",max:5,criteria:[["Contenu persuasif",3],["Language corporel et ton",2]]},{name:"Amendments",max:10,criteria:[["Présente des amendements innovants",3],["Présente et débat les amendements hostiles avec une compréhension claire",4],["Diplomatie et Communication",1],["Envoi des amendments raisonnables et réalisables",2]]},{name:"Crise",max:4,criteria:[["Fait preuve de professionnalisme, de diplomatie et coopére à tout moment",2],["Présente des solutions réalisables et créatives au problème lors de son discours",1],["Bon ton, présence et langage corporel lors de la présentation",1]]},{name:"Points supplémentaires",max:6,criteria:[["Points et motions soulevés",6]]}],
 ar:[{name:"الخطاب الافتتاحي",max:20,criteria:[["المضمون",5],["تقديم حلول مناسبة للموضوع",2],["الالتزام بموقف الدولة",3],["لغة الجسد ونبرة الصوت",3],["احترام الوقت",1],["قدرة المندوب على الإجابة عن الأسئلة الموجّهة له",3],["استخدام مهارات التواصل والحفاظ على الدبلوماسية",2],["التنازل بالوقت",1]]},{name:"التجمع الخاضع للإشراف",max:15,criteria:[["المضمون",5],["تقديم حلول مناسبة للموضوع الفرعي",1],["الالتزام بموقف الدولة",2],["لغة الجسد ونبرة الصوت",1],["قدرة المندوب على الإجابة عن الأسئلة الموجّهة له",2],["استخدام مهارات التواصل والحفاظ على الدبلوماسية",2],["مدى ارتباط الحجة وتطوّرها",2]]},{name:"التجمع غير الخاضع للإشراف",max:20,criteria:[["المشاركة والمساهمة داخل الكتلة",4],["مدى صلة وأهمية المحتوى المقترح",4],["التعاون والتفاوض",4],["الهيكل الصحيح لمشروع القرار",3],["الحفاظ على الدبلوماسية (مهارات التواصل)",3],["قابلية تنفيذ الحلول",2]]},{name:"عرض مشروع القرار",max:20,criteria:[["عرض القرار بطريقة موجزة وسهلة الفهم",5],["قدرة المندوب على الإجابة عن الأسئلة الموجّهة له",5],["وضوح مشروع القرار والمعرفة به",4],["نبرة الصوت ولغة الجسد",3],["الحفاظ على الدبلوماسية (مهارات التواصل)",3]]},{name:"خطاب مؤيد أو معارض",max:5,criteria:[["محتوى إقناعي",3],["نبرة إقناعية ولغة جسد فعّالة",2]]},{name:"التعديلات",max:10,criteria:[["يقدّم تعديلات مبتكرة",3],["يقدّم ويناقش تعديلًا غير ودي بفهم واضح",4],["الحفاظ على الدبلوماسية (مهارات التواصل)",1],["يقدّم المندوب تعديلات منطقية وقابلة للتنفيذ",2]]},{name:"الأزمة",max:4,criteria:[["يظهر الاحترافية والدبلوماسية والتعاون في جميع الأوقات",2],["يقدّم حلولًا قابلة للتنفيذ ومبتكرة للمشكلة أثناء خطابه",1],["نبرة جيدة، وحضور مميز، ولغة جسد فعّالة أثناء تقديم الخطاب",1]]},{name:"إضافات",max:6,criteria:[["النقاط والاقتراحات المطروحة",6]]}]
 };
-const uiT={fr:{"Overview":"Vue d'ensemble","Committees":"Comités","Countries":"Pays","Staff & Dais":"Personnel et présidence","Delegates":"Délégués","Resolution Papers":"Projets de résolution","Grading":"Évaluation","Chairing Screen":"Écran de présidence","Resources":"Ressources","Logistics Requests":"Demandes logistiques","Settings":"Paramètres","Finance":"Finance","Training":"Formation","Rapporteurs":"Rapporteurs","My Committee":"Mon comité","Delegate Portal":"Portail des délégués","My Resolution Papers":"Mes projets de résolution","Sign in":"Se connecter","Sign out":"Se déconnecter","Password":"Mot de passe","Role":"Rôle","Chair":"Président","President":"Président","Deputy President":"Vice-président","Secretary-General":"Secrétaire général","Head of Logistics":"Responsable de la logistique","Head of Training":"Responsable de la formation","Head of Rapporteurs":"Responsable des rapporteurs","Advisory Panel":"Conseil consultatif","Delegate":"Délégué","Search":"Rechercher","Save":"Enregistrer","Delete":"Supprimer"},ar:{"Overview":"نظرة عامة","Committees":"اللجان","Countries":"الدول","Staff & Dais":"الموظفون وهيئة الرئاسة","Delegates":"المندوبون","Resolution Papers":"مشاريع القرارات","Grading":"التقييم","Chairing Screen":"شاشة هيئة الرئاسة","Resources":"الموارد","Logistics Requests":"الطلبات اللوجستية","Settings":"الإعدادات","Finance":"المالية","Training":"التدريب","Rapporteurs":"المقررون","My Committee":"لجنتي","Delegate Portal":"بوابة المندوب","My Resolution Papers":"مشاريع قراراتي","Sign in":"تسجيل الدخول","Sign out":"تسجيل الخروج","Password":"كلمة المرور","Role":"الدور","Chair":"الرئيس","President":"الرئيس","Deputy President":"نائب الرئيس","Secretary-General":"الأمين العام","Head of Logistics":"رئيس اللوجستيات","Head of Training":"رئيس التدريب","Head of Rapporteurs":"رئيس المقررين","Advisory Panel":"المجلس الاستشاري","Delegate":"مندوب","Search":"بحث","Save":"حفظ","Delete":"حذف"}};
+const uiT={fr:{"Overview":"Vue d'ensemble","Committees":"Comités","Countries":"Pays","Staff & Dais":"Personnel et présidence","Delegates":"Délégués","Resolution Papers":"Projets de résolution","Grading":"Évaluation","Chairing Screen":"Écran de présidence","Resources":"Ressources","Logistics Requests":"Demandes logistiques","Settings":"Paramètres","Finance":"Finance","Training":"Formation","Rapporteurs":"Rapporteurs","My Committee":"Mon comité","Delegate Portal":"Portail des délégués","My Resolution Papers":"Mes projets de résolution","Sign in":"Se connecter","Sign out":"Se déconnecter","Password":"Mot de passe","Role":"Rôle","Chair":"Président","President":"Président","Deputy President":"Vice-président","Secretary-General":"Secrétaire général","Head of Logistics":"Responsable de la logistique","Head of Training":"Responsable de la formation","Head of Rapporteurs":"Responsable des rapporteurs","Head of Global Village":"Responsable du Village Global","Advisory Panel":"Conseil consultatif","Delegate":"Délégué","Search":"Rechercher","Save":"Enregistrer","Delete":"Supprimer"},ar:{"Overview":"نظرة عامة","Committees":"اللجان","Countries":"الدول","Staff & Dais":"الموظفون وهيئة الرئاسة","Delegates":"المندوبون","Resolution Papers":"مشاريع القرارات","Grading":"التقييم","Chairing Screen":"شاشة هيئة الرئاسة","Resources":"الموارد","Logistics Requests":"الطلبات اللوجستية","Settings":"الإعدادات","Finance":"المالية","Training":"التدريب","Rapporteurs":"المقررون","My Committee":"لجنتي","Delegate Portal":"بوابة المندوب","My Resolution Papers":"مشاريع قراراتي","Sign in":"تسجيل الدخول","Sign out":"تسجيل الخروج","Password":"كلمة المرور","Role":"الدور","Chair":"الرئيس","President":"الرئيس","Deputy President":"نائب الرئيس","Secretary-General":"الأمين العام","Head of Logistics":"رئيس اللوجستيات","Head of Training":"رئيس التدريب","Head of Rapporteurs":"رئيس المقررين","Head of Global Village":"رئيس القرية العالمية","Advisory Panel":"المجلس الاستشاري","Delegate":"مندوب","Search":"بحث","Save":"حفظ","Delete":"حذف"}};
 function langUI(id){const label=hhhLanguage==="fr"?"Langue":hhhLanguage==="ar"?"اللغة":"Language";return `<div class="language-wrap"><span>${label}</span><select id="${id}" onchange="setHHHLang(this.value)" aria-label="Language">${Object.entries(HHH_LANGS).map(([k,v])=>`<option value="${k}" ${k===hhhLanguage?"selected":""}>${v}</option>`).join("")}</select></div>`}
 const HHH_TEXT_ORIGINAL=new WeakMap();
 const HHH_PHRASES={
@@ -1333,9 +1406,9 @@ function applyHHHLang(){
     node.nodeValue=hhhTranslateText(original,hhhLanguage);
   });
   const roleLabels={
-    en:{president:"President",deputy:"Deputy President",sg:"Secretary-General",logistics:"Head of Logistics",finance:"Head of Finance",training:"Head of Training",rapporteur:"Head of Rapporteurs",advisory:"Advisory Panel",chair:"Chair",delegate:"Delegate"},
-    fr:{president:"Président",deputy:"Vice-président",sg:"Secrétaire général",logistics:"Responsable de la logistique",finance:"Responsable des finances",training:"Responsable de la formation",rapporteur:"Responsable des rapporteurs",advisory:"Conseil consultatif",chair:"Président de comité",delegate:"Délégué"},
-    ar:{president:"الرئيس",deputy:"نائب الرئيس",sg:"الأمين العام",logistics:"رئيس قسم اللوجستيات",finance:"رئيس قسم الشؤون المالية",training:"رئيس قسم التدريب",rapporteur:"رئيس قسم المقررين",advisory:"المجلس الاستشاري",chair:"رئيس اللجنة",delegate:"مندوب"}
+    en:{president:"President",deputy:"Deputy President",sg:"Secretary-General",logistics:"Head of Logistics",finance:"Head of Finance",training:"Head of Training",rapporteur:"Head of Rapporteurs",globalvillage:"Head of Global Village",advisory:"Advisory Panel",chair:"Chair",delegate:"Delegate"},
+    fr:{president:"Président",deputy:"Vice-président",sg:"Secrétaire général",logistics:"Responsable de la logistique",finance:"Responsable des finances",training:"Responsable de la formation",rapporteur:"Responsable des rapporteurs",globalvillage:"Responsable du Village Global",advisory:"Conseil consultatif",chair:"Président de comité",delegate:"Délégué"},
+    ar:{president:"الرئيس",deputy:"نائب الرئيس",sg:"الأمين العام",logistics:"رئيس قسم اللوجستيات",finance:"رئيس قسم الشؤون المالية",training:"رئيس قسم التدريب",rapporteur:"رئيس قسم المقررين",globalvillage:"رئيس القرية العالمية",advisory:"المجلس الاستشاري",chair:"رئيس اللجنة",delegate:"مندوب"}
   };
   const roleSelect=document.getElementById("accountType");
   if(roleSelect){
@@ -1391,7 +1464,7 @@ function hhhRoleCommittees(){
 }
 function hhhRoleCommittee(){return hhhRoleCommittees()[0]||null}
 function canAccessCommitteeGrading(cid){
-  if(["logistics","sg","training","advisory"].includes(state.role))return true;
+  if(["logistics","sg","training","rapporteur","advisory"].includes(state.role))return true;
   if(["president","deputy","chair"].includes(state.role))return hhhRoleCommittees().includes(cid);
   return false;
 }
@@ -1517,7 +1590,7 @@ function enterGrading(){
   if(!id)return alert(hhhLanguage==="ar"?"يرجى اختيار لجنة أولًا.":hhhLanguage==="fr"?"Veuillez d’abord sélectionner un comité.":"Please select a committee first.");
   if(!c)return alert("Selected committee could not be found.");
   if(!canAccessCommitteeGrading(id))return alert("You do not have access to this committee's grading system.");
-  const unrestricted=["logistics","sg","training","advisory"].includes(state.role);
+  const unrestricted=["logistics","sg","training","rapporteur","advisory"].includes(state.role);
   if(!unrestricted){
     const requiredPassword=c.gradingPassword;
     if(pass!==requiredPassword)return alert("Incorrect committee password.");
@@ -1544,7 +1617,7 @@ const _oldGrading=pages.grading;pages.grading=()=>{
  const committeeField=daisRole
    ?(allowed[0]?`<div class="form-field"><label>${lab}</label><div class="form-input" style="display:flex;align-items:center;min-height:42px;background:#f5f7f9;font-weight:700;">${esc(allowed[0].name||assigned)}</div></div>`:`<div class="empty"><strong>No committee assigned</strong><p>Ask Head of Logistics to assign this account to a committee.</p></div>`)
    :selectField(lab,"gradeCom",`<option value="">${ph}</option>`+allowed.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""));
- const passwordField=(daisRole||!["logistics","sg","training","advisory"].includes(state.role))?formField(pw,"gradePass",`type="password" placeholder="${pw}" autocomplete="current-password"`):"";
+ const passwordField=(daisRole||!["logistics","sg","training","rapporteur","advisory"].includes(state.role))?formField(pw,"gradePass",`type="password" placeholder="${pw}" autocomplete="current-password"`):"";
  return `<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>${hhhLanguage==="en"?"Enter a committee grading room":hhhLanguage==="fr"?"Accéder à la salle d’évaluation":"الدخول إلى نظام تقييم اللجنة"}</h3><p>${description}</p></div></div><div class="panel"><div class="modal-body">${committeeField}${passwordField}<button class="primary full" onclick="enterGrading()" ${daisRole&&!assigned?"disabled":""}>${btn}</button></div></div>`;
 };
 
