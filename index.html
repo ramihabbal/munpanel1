@@ -133,8 +133,8 @@ function mergeArrayThreeWay(base, local, remote){
   }
   return out;
 }
-function defaultScreenState(committeeId=""){return {committeeId:String(committeeId||""),speaker:"",country:"",topic:"",mode:"",motion:"",agenda:"",nextSpeaker:"",timer:"",timerSeconds:0,timerRunning:false,resolutionId:"",openingSpeechIndex:0,moderatedSpeakerQueue:[],moderatedSpeakerIndex:0,updated:0};}
-function normalizeScreenStates(value){const out={};if(value&&typeof value==="object"&&!Array.isArray(value)){for(const [id,v] of Object.entries(value)){if(!id)continue;out[id]={...defaultScreenState(id),...(v&&typeof v==="object"?v:{}),committeeId:String(id)};}}return out;}
+function defaultScreenState(committeeId=""){return {committeeId:String(committeeId||""),speaker:"",country:"",delegation:"",topic:"",mode:"",motion:"",agenda:"",nextSpeaker:"",timer:"",timerSeconds:0,timerRunning:false,resolutionId:"",openingSpeechIndex:0,moderatedSpeakerQueue:[],moderatedSpeakerIndex:0,updated:0};}
+function normalizeScreenStates(value){const out={};if(value&&typeof value==="object"&&!Array.isArray(value)){for(const [id,v0] of Object.entries(value)){if(!id)continue;const v=v0&&typeof v0==="object"?{...v0}:{};const del=String(v.delegation??v.country??"");v.delegation=del;v.country=del;out[id]={...defaultScreenState(id),...v,committeeId:String(id)};}}return out;}
 function mergeScreenStatesThreeWay(base,local,remote){const out={};const ids=new Set([...Object.keys(base||{}),...Object.keys(local||{}),...Object.keys(remote||{})]);for(const id of ids){const b=base?.[id],l=local?.[id],r=remote?.[id];if(!l&&!r)continue;if(!l&&!b){out[id]=cloneData(r);continue}if(!r&&!b){out[id]=cloneData(l);continue}if(!l&&b&&!sameJSON(r,b)){out[id]=cloneData(r);continue}if(!r&&b&&!sameJSON(l,b)){out[id]=cloneData(l);continue}out[id]=sameJSON(l,b)?cloneData(r):cloneData(l);out[id]={...defaultScreenState(id),...(out[id]||{}),committeeId:String(id)};}return out;}
 function getScreenState(committeeId){const id=String(committeeId||state.data.screen?.committeeId||"");state.data.screenStates=normalizeScreenStates(state.data.screenStates);if(!id)return {...defaultScreenState(""),...(state.data.screen||{})};if(!state.data.screenStates[id]){const legacy=state.data.screen?.committeeId===id?state.data.screen:{};state.data.screenStates[id]={...defaultScreenState(id),...legacy,committeeId:id};}return state.data.screenStates[id];}
 function setScreenState(committeeId,patch){const id=String(committeeId||"");if(!id)return null;const cur=getScreenState(id);/* getScreenState re-creates state.data.screenStates, so read it first and write afterwards */const next={...cur,...patch,committeeId:id};state.data.screenStates[id]=next;state.data.screen={...next};return next;}
@@ -168,14 +168,19 @@ let screenWindowCommitteeId="";
 
 function broadcastScreenState(id,screenState){
   if(!id||!screenState)return false;
-  // Local-file projector transport: update the about:blank child window directly.
-  // No file:// navigation, hash, storage, BroadcastChannel, or postMessage is used.
-  return renderProjectorScreen(id,screenState,screenWindowRef);
+  let sent=false;
+  try{
+    if(screenWindowRef&&!screenWindowRef.closed){
+      screenWindowRef.postMessage({type:"HHHSMUN_PROJECTOR_STATE",payload:projectorScreenPayload(id,screenState)},"*");
+      sent=true;
+    }
+  }catch(e){console.warn("Projector postMessage failed",e)}
+  return sent;
 }
 setInterval(()=>{
   try{
     if(screenWindowRef&&!screenWindowRef.closed&&screenWindowCommitteeId){
-      renderProjectorScreen(screenWindowCommitteeId,getScreenState(screenWindowCommitteeId),screenWindowRef);
+      broadcastScreenState(screenWindowCommitteeId,getScreenState(screenWindowCommitteeId));
     }
   }catch(e){}
 },1000);
@@ -205,11 +210,11 @@ async function publishScreenStateNow(id){
 function openingQueueStatusText(id){
   const q=committeeOpeningQueue(id),d=getScreenDraft(id)||{};const i=Math.max(0,Number(d.openingSpeechIndex)||0);
   if(!q.length)return "No countries assigned to this committee.";
-  return i>=q.length?`All ${q.length} countries have completed their opening speech.`:`Next: ${q[i].country} · ${i+1} of ${q.length}`;
+  return i>=q.length?`All ${q.length} countries have completed their opening speech.`:`Next: ${q[i].country} · ${i+1} / ${q.length}`;
 }
 function moderatedQueueStatusText(id){
   const d=getScreenDraft(id)||{},q=moderatedSpeakerQueueFromText(d.moderatedText),i=Math.max(0,Number(d.moderatedSpeakerIndex)||0);
-  return q.length?(i>=q.length?`All ${q.length} speakers have been called.`:`Next: ${q[i]} · ${i+1} of ${q.length}`):"Add one speaker per line, then press Next Speaker.";
+  return q.length?(i>=q.length?`All ${q.length} speakers have been called.`:`Next: ${q[i]} · ${i+1} / ${q.length}`):"Add one speaker per line, then press Next Speaker.";
 }
 function nextScreenSpeaker(){
   const id=screenSelectedId();if(!id||!requireCommitteeAccess(id))return;
@@ -219,7 +224,7 @@ function nextScreenSpeaker(){
     if(!q.length)return alert("No countries are assigned to this committee.");
     if(i>=q.length)return alert("All countries have already completed their opening speech. Use Restart Opening to run the list again.");
     const item=q[i],next=q[i+1];
-    Object.assign(d,{mode:"Opening Speech",motion:"Opening Speech",topic:d.topic||"Opening Speech",speaker:item.speaker,country:item.country,nextSpeaker:next?.speaker?`${next.speaker} · ${next.country}`:"",minutes:1,seconds:0,timerAction:"start",openingSpeechIndex:i+1,savedAt:Date.now()});
+    Object.assign(d,{mode:"Opening Speech",motion:"Opening Speech",topic:d.topic||"Opening Speech",speaker:"",country:item.country,delegation:item.country,nextSpeaker:"",minutes:1,seconds:0,timerAction:"start",openingSpeechIndex:i+1,savedAt:Date.now()});
     save();render();return;
   }
   if(mode==="Moderated Caucus"){
@@ -227,7 +232,7 @@ function nextScreenSpeaker(){
     if(!typed.length)return alert("Add at least one moderated-caucus speaker, one per line.");
     if(i>=typed.length)return alert("All moderated-caucus speakers have been called. Use Restart List to run the list again.");
     const current=parseSpeakerEntry(typed[i]),next=typed[i+1];
-    Object.assign(d,{speaker:current.speaker,country:current.country,nextSpeaker:next||"",moderatedSpeakerIndex:i+1,savedAt:Date.now()});
+    const who=current.country||current.speaker||"";Object.assign(d,{speaker:"",country:who,delegation:who,nextSpeaker:"",moderatedSpeakerIndex:i+1,savedAt:Date.now()});
     save();render();return;
   }
   alert("Select Opening Speech or Moderated Caucus first.");
@@ -235,8 +240,8 @@ function nextScreenSpeaker(){
 function restartScreenQueue(){
   const id=screenSelectedId();if(!id||!requireCommitteeAccess(id))return;
   saveScreenDraftFromForm();const d=getScreenDraft(id),mode=d.mode;
-  if(mode==="Opening Speech"){Object.assign(d,{openingSpeechIndex:0,speaker:"",country:"",nextSpeaker:"",minutes:1,seconds:0,timerAction:"set",savedAt:Date.now()})}
-  else if(mode==="Moderated Caucus"){const q=moderatedSpeakerQueueFromText(d.moderatedText);Object.assign(d,{moderatedText:q.join("\n"),moderatedSpeakerIndex:0,speaker:"",country:"",nextSpeaker:q[0]||"",savedAt:Date.now()})}
+  if(mode==="Opening Speech"){Object.assign(d,{openingSpeechIndex:0,speaker:"",country:"",delegation:"",nextSpeaker:"",minutes:1,seconds:0,timerAction:"set",savedAt:Date.now()})}
+  else if(mode==="Moderated Caucus"){const q=moderatedSpeakerQueueFromText(d.moderatedText);Object.assign(d,{moderatedText:q.join("\n"),moderatedSpeakerIndex:0,speaker:"",country:"",delegation:"",nextSpeaker:"",savedAt:Date.now()})}
   else return alert("Select Opening Speech or Moderated Caucus first.");
   save();render();
 }
@@ -248,8 +253,11 @@ function mergeConferenceState(base,local,remote){
   out.screen=sameJSON(lScreen,bScreen)?cloneData(rScreen):cloneData(lScreen);
   const bs=normalizeScreenStates(base?.screenStates), ls=normalizeScreenStates(local?.screenStates), rs=normalizeScreenStates(remote?.screenStates);
   out.screenStates=mergeScreenStatesThreeWay(bs,ls,rs);
+  { const bd=base?.screenDrafts||{},ld=local?.screenDrafts||{},rd=remote?.screenDrafts||{},od={...rd};
+    for(const id of new Set([...Object.keys(ld),...Object.keys(rd)])){ if(!sameJSON(ld[id],bd[id])){ if(ld[id]!==undefined)od[id]=cloneData(ld[id]); } }
+    out.screenDrafts=od; }
   for(const k of new Set([...Object.keys(remote||{}),...Object.keys(local||{})])){
-    if(arrayKeys.includes(k)||k==='screen'||k==='screenStates') continue;
+    if(arrayKeys.includes(k)||k==='screen'||k==='screenStates'||k==='screenDrafts') continue;
     const lv=local?.[k], bv=base?.[k], rv=remote?.[k];
     out[k]=sameJSON(lv,bv)?cloneData(rv):cloneData(lv);
   }
@@ -845,7 +853,7 @@ function getScreenDraft(id){
   let d=state.data.screenDrafts[id];
   if(!d){
     const s=getScreenState(id),t=Math.max(0,Number(s.timerSeconds)||0);
-    d=state.data.screenDrafts[id]={speaker:s.speaker||"",country:s.country||"",topic:s.topic||"",agenda:s.agenda||"",nextSpeaker:s.nextSpeaker||"",mode:s.mode||"",motion:s.motion||"",moderatedText:(s.moderatedSpeakerQueue||[]).join("\n"),minutes:Math.floor(t/60),seconds:t%60,timerAction:"",resolutionId:s.resolutionId||"",openingSpeechIndex:Number(s.openingSpeechIndex)||0,moderatedSpeakerIndex:Number(s.moderatedSpeakerIndex)||0,savedAt:0};
+    d=state.data.screenDrafts[id]={speaker:s.speaker||"",country:s.delegation??s.country??"",delegation:s.delegation??s.country??"",topic:s.topic||"",agenda:s.agenda||"",nextSpeaker:s.nextSpeaker||"",mode:s.mode||"",motion:s.motion||"",moderatedText:(s.moderatedSpeakerQueue||[]).join("\n"),minutes:Math.floor(t/60),seconds:t%60,timerAction:"",resolutionId:s.resolutionId||"",openingSpeechIndex:Number(s.openingSpeechIndex)||0,moderatedSpeakerIndex:Number(s.moderatedSpeakerIndex)||0,savedAt:0};
   }
   return d;
 }
@@ -858,7 +866,9 @@ function fmtClock(t){t=Math.max(0,Number(t)||0);return String(Math.floor(t/60)).
 function screenDraftDirty(id){
   const d=getScreenDraft(id),s=getScreenState(id);if(!d)return false;
   const t=x=>String(x||"").trim();
-  if(["speaker","country","topic","agenda","nextSpeaker","motion"].some(k=>t(d[k])!==t(s[k])))return true;
+  if(t(d.speaker)!==t(s.speaker))return true;
+  if(t(d.delegation??d.country)!==t(s.delegation??s.country))return true;
+  if(["topic","agenda","nextSpeaker","motion"].some(k=>t(d[k])!==t(s[k])))return true;
   if(String(d.mode||"")!==String(s.mode||""))return true;
   if(String(d.resolutionId||"")!==String(s.resolutionId||""))return true;
   if((Number(d.openingSpeechIndex)||0)!==(Number(s.openingSpeechIndex)||0))return true;
@@ -871,21 +881,23 @@ function screenDraftStatusHtml(id){
   const dirty=screenDraftDirty(id);
   const saved=d.savedAt?new Date(d.savedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"";
   const labels={start:`Timer will start at ${fmtClock(draftTimerSeconds(d,"start"))}`,set:`Timer will be set to ${fmtClock(draftTimerSeconds(d,"set"))}`,pause:"Timer will pause",reset:"Timer will reset to 00:00"};
-  return `<span class="draft-dot ${dirty?"dirty":"clean"}"></span><div><strong>${dirty?"Unpublished changes — the connected screen has NOT changed yet":"Connected screen is up to date"}</strong><small>Draft saved automatically${saved?` at ${saved}`:""}. It stays here if you leave this page and come back.${d.timerAction?` · Pending: ${labels[d.timerAction]||""}`:""}</small></div>`;
+  return `<span class="draft-dot ${dirty?"dirty":"clean"}"></span><div><strong>${dirty?"Unpublished changes — the connected screen has NOT changed yet":"Connected screen is up to date"}</strong><small>Draft saved automatically at ${saved||"—"}${d.savedBy?` · ${esc(d.savedBy)}`:""}. It stays here if you leave this page and come back.${d.timerAction?` · Pending: ${labels[d.timerAction]||""}`:""}</small></div>`;
 }
 function refreshScreenDraftStatus(){
   const el=document.getElementById("screenDraftStatus"),id=screenSelectedId();
   if(el&&id)el.innerHTML=screenDraftStatusHtml(id);
 }
+function screenEditorName(){try{return hhhRoleName()||(state.role==="sg"?"Secretary-General":String(state.role||""))}catch(e){return String(state.role||"")}}
 function saveScreenDraftFromForm(){
-  const id=screenSelectedId();if(!id||!document.getElementById("screenSpeaker"))return id?getScreenDraft(id):null;
+  const id=screenSelectedId();if(!id||!document.getElementById("screenCountry"))return id?getScreenDraft(id):null;
   const d=getScreenDraft(id),v=x=>document.getElementById(x);
-  d.speaker=v("screenSpeaker").value;d.country=v("screenCountry")?.value||"";d.topic=v("screenTopic")?.value||"";d.agenda=v("screenAgenda")?.value||"";d.nextSpeaker=v("screenNextSpeaker")?.value||"";d.mode=v("screenMode")?.value||"";d.motion=v("screenMotion")?.value||"";
+  d.delegation=v("screenCountry")?.value||"";d.country=d.delegation;d.topic=v("screenTopic")?.value||"";d.mode=v("screenMode")?.value||"";
   if(v("screenModeratedSpeakers"))d.moderatedText=v("screenModeratedSpeakers").value;
   d.minutes=v("screenMinutes")?.value??d.minutes;d.seconds=v("screenSeconds")?.value??d.seconds;
-  d.savedAt=Date.now();save();return d;
+  d.savedAt=Date.now();d.savedBy=screenEditorName();save();return d;
 }
 function screenPage(){
+  reattachProjector();
   const forced=currentUserCommitteeId();
   const selected=forced||state.data.screen?.committeeId||state.data.committees?.[0]?.id||"";
   if(selected&&!getScreenState(selected).committeeId)setScreenState(selected,{});
@@ -895,9 +907,11 @@ function screenPage(){
   const committeeField=isCommitteeDaisRole()?`<div class="form-field"><label>Committee</label><div class="form-input" style="display:flex;align-items:center;min-height:42px;background:#f5f7f9;font-weight:700;">${esc(c?.name||"No committee assigned")}</div></div>`:selectField("Committee","screenCom",`<option value="">Select committee</option>`+state.data.committees.map(x=>`<option value="${x.id}" ${selected===x.id?"selected":""}>${esc(x.name)}</option>`).join(""),`onchange="changeScreenCommittee(this.value)"`);
   const modeOpts=["Opening Speech","Moderated Caucus","Unmoderated Caucus","General Speakers List","Voting","Other"].concat(d.mode==="Resolution for review"?["Resolution for review"]:[]);
   const modeSel=`<option value="">Select type</option>`+modeOpts.map(m=>`<option value="${m}" ${d.mode===m?"selected":""}>${m}</option>`).join("");
-  return `<div class="live-header"><div><span class="live-kicker">CHAIRING PANEL DISPLAY</span><h3>${esc(c?.name||"No committee selected")}</h3></div><div class="updated">Nothing changes on the connected screen until you press “Update connected screen”</div></div><div class="live-grid"><div class="live-card"><div class="live-card-head"><strong>On the connected screen now</strong><span class="status in-session">LIVE</span></div><div class="speaker-card"><div class="big-timer" id="chairLiveTimer">${fmtClock(total)}</div><strong>${esc(s.speaker||"Awaiting chair input")}</strong><span>${esc(s.topic||"No topic set")}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Committee</strong></div><div class="live-mode">${esc(c?.fullName||"Select a committee")}</div><div class="timer">${esc(c?.room||"—")}</div><div class="live-meta"><span>President / Deputy / Chair</span><span>${c?state.data.staff.filter(x=>x.committee===c.id&&["President","Deputy President","Chair"].includes(x.role)).length+" / 3":"—"}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Resolution on display</strong></div><div class="live-mode">${r?esc(r.title):"None"}</div><div class="timer">${r?esc(r.status):"—"}</div><div class="live-meta"><span>Main</span><span>${r?(r.main||[]).length:"0"}</span></div></div></div><div class="panel"><div class="panel-head"><div><h3>Chair controls</h3><p>Everything you enter here is a draft: it is saved automatically but only goes to the connected screen when you press Update. Timer buttons are also applied on Update.</p></div></div><div class="modal-body">${committeeField}${formField("Speaker / item","screenSpeaker",`type="text" value="${esc(d.speaker||"")}" autocomplete="off"`)}${formField("Country","screenCountry",`type="text" value="${esc(d.country||"")}" autocomplete="off"`)}${formField("Topic","screenTopic",`type="text" value="${esc(d.topic||"")}" autocomplete="off"`)}${formField("Current agenda item","screenAgenda",`type="text" value="${esc(d.agenda||"")}" autocomplete="off"`)}${formField("Next speaker","screenNextSpeaker",`type="text" value="${esc(d.nextSpeaker||"")}" autocomplete="off"`)}${selectField("Motion / caucus type","screenMode",modeSel,`onchange="toggleScreenQueueControls(this.value)"`)}${formField("Current motion","screenMotion",`type="text" value="${esc(d.motion||"")}" placeholder="e.g. Motion for a 10-minute moderated caucus" autocomplete="off"`)}<div id="openingQueueControls" class="screen-queue-panel" style="display:${d.mode==="Opening Speech"?"block":"none"}"><div class="screen-queue-head"><div><strong>Opening Speech Queue</strong><span>${esc(openingQueueStatusText(c?.id||""))}</span></div><div class="screen-queue-actions"><button class="secondary" type="button" onclick="nextScreenSpeaker()">Next Country</button><button class="row-btn" type="button" onclick="restartScreenQueue()">Restart Opening</button></div></div><p class="muted">Countries are called automatically in alphabetical order. Each Next Country prepares the speaker with a fixed 1:00 timer — press Update to show it.</p></div><div id="moderatedQueueControls" class="screen-queue-panel" style="display:${d.mode==="Moderated Caucus"?"block":"none"}"><div class="screen-queue-head"><div><strong>Moderated Caucus Speaker List</strong><span>${esc(moderatedQueueStatusText(c?.id||""))}</span></div><div class="screen-queue-actions"><button class="secondary" type="button" onclick="nextScreenSpeaker()">Next Speaker</button><button class="row-btn" type="button" onclick="restartScreenQueue()">Restart List</button></div></div><label class="form-label">Speakers (one per line; optional format: Speaker — Country)</label><textarea id="screenModeratedSpeakers" class="form-input" rows="6" placeholder="Speaker 1\nSpeaker 2 — Lebanon\nSpeaker 3">${esc(d.moderatedText||"")}</textarea><p class="muted">The Next Speaker button follows the order you type. The timer is not changed automatically for moderated caucus.</p></div><div class="timer-input-grid"><div><label class="form-label">Minutes</label><input id="screenMinutes" class="form-input" type="number" min="0" max="999" step="1" value="${esc(String(d.minutes??0))}"></div><div><label class="form-label">Seconds</label><input id="screenSeconds" class="form-input" type="number" min="0" max="59" step="1" value="${esc(String(d.seconds??0))}"></div></div><div class="settings-actions timer-actions"><button class="primary" type="button" onclick="startScreenTimer()">Start</button><button class="secondary" type="button" onclick="pauseScreenTimer()">Pause</button><button class="secondary" type="button" onclick="resetScreenTimer()">Reset</button><button class="secondary" type="button" onclick="setScreenTimerFromFields()">Set timer</button></div>${dr?`<div class="draft-resolution"><span>Resolution queued for the screen: <strong>${esc(dr.title)}</strong></span><button class="row-btn" type="button" onclick="clearScreenResolution()">Remove</button></div>`:(d.resolutionId?`<div class="draft-resolution"><span>A resolution is queued for the screen.</span><button class="row-btn" type="button" onclick="clearScreenResolution()">Remove</button></div>`:"")}<div id="screenDraftStatus" class="draft-status">${screenDraftStatusHtml(selected)}</div><button class="primary full" onclick="updateScreen()">Update connected screen</button><button class="secondary full" onclick="openScreenWindow()">Open projector / screen window</button>${r?`<div class="panel" style="margin-top:18px"><div class="panel-head"><div><h3>${esc(r.title)}</h3><p>${esc(r.status)}</p></div></div><div class="modal-body"><p class="muted">${esc(r.clauses)}</p><p><strong>Main submitters:</strong> ${(r.main||[]).map(esc).join(", ")||"—"}</p><p><strong>Co-submitters:</strong> ${(r.co||[]).map(esc).join(", ")||"—"}</p></div></div>`:""}</div></div>`;
+  return `<div class="live-header"><div><span class="live-kicker">CHAIRING PANEL DISPLAY</span><h3>${esc(c?.name||"No committee selected")}</h3></div><div class="updated">Nothing changes on the connected screen until you press “Update connected screen”</div></div><div class="live-grid"><div class="live-card"><div class="live-card-head"><strong>On the connected screen now</strong><span class="status in-session">LIVE</span></div><div class="speaker-card"><div class="big-timer" id="chairLiveTimer">${fmtClock(total)}</div><strong>${esc(s.country||"Awaiting delegation")}</strong><span>${esc(s.topic||"No topic set")}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Committee</strong></div><div class="live-mode">${esc(c?.fullName||"Select a committee")}</div><div class="timer">${esc(c?.room||"—")}</div><div class="live-meta"><span>President / Deputy / Chair</span><span>${c?state.data.staff.filter(x=>x.committee===c.id&&["President","Deputy President","Chair"].includes(x.role)).length+" / 3":"—"}</span></div></div><div class="live-card"><div class="live-card-head"><strong>Resolution on display</strong></div><div class="live-mode">${r?esc(r.title):"None"}</div><div class="timer">${r?esc(r.status):"—"}</div><div class="live-meta"><span>Main</span><span>${r?(r.main||[]).length:"0"}</span></div></div></div><div class="panel"><div class="panel-head"><div><h3>Chair controls</h3><p>Everything you enter here is a draft: it is saved automatically but only goes to the connected screen when you press Update. Timer buttons are also applied on Update.</p></div></div><div class="modal-body">${committeeField}${formField("Delegation","screenCountry",`type="text" value="${esc(d.country||"")}" autocomplete="off"`)}${formField("Topic","screenTopic",`type="text" value="${esc(d.topic||"")}" autocomplete="off"`)}${selectField("Motion / caucus type","screenMode",modeSel,`onchange="toggleScreenQueueControls(this.value)"`)}<div id="openingQueueControls" class="screen-queue-panel" style="display:${d.mode==="Opening Speech"?"block":"none"}"><div class="screen-queue-head"><div><strong>Opening Speech Queue</strong><span>${esc(openingQueueStatusText(c?.id||""))}</span></div><div class="screen-queue-actions"><button class="secondary" type="button" onclick="nextScreenSpeaker()">Next Country</button><button class="row-btn" type="button" onclick="restartScreenQueue()">Restart Opening</button></div></div><p class="muted">Countries are called automatically in alphabetical order. Each Next Country prepares the speaker with a fixed 1:00 timer — press Update to show it.</p></div><div id="moderatedQueueControls" class="screen-queue-panel" style="display:${d.mode==="Moderated Caucus"?"block":"none"}"><div class="screen-queue-head"><div><strong>Moderated Caucus Speaker List</strong><span>${esc(moderatedQueueStatusText(c?.id||""))}</span></div><div class="screen-queue-actions"><button class="secondary" type="button" onclick="nextScreenSpeaker()">Next Speaker</button><button class="row-btn" type="button" onclick="restartScreenQueue()">Restart List</button></div></div><label class="form-label">Speakers (one per line; optional format: Speaker — Country)</label><textarea id="screenModeratedSpeakers" class="form-input" rows="6" placeholder="Speaker 1\nSpeaker 2 — Lebanon\nSpeaker 3">${esc(d.moderatedText||"")}</textarea><p class="muted">The Next Speaker button follows the order you type. The timer is not changed automatically for moderated caucus.</p></div><div class="timer-input-grid"><div><label class="form-label">Minutes</label><input id="screenMinutes" class="form-input" type="number" min="0" max="999" step="1" value="${esc(String(d.minutes??0))}"></div><div><label class="form-label">Seconds</label><input id="screenSeconds" class="form-input" type="number" min="0" max="59" step="1" value="${esc(String(d.seconds??0))}"></div></div><div class="settings-actions timer-actions"><button class="primary" type="button" onclick="startScreenTimer()">Start</button><button class="secondary" type="button" onclick="pauseScreenTimer()">Pause</button><button class="secondary" type="button" onclick="resetScreenTimer()">Reset</button><button class="secondary" type="button" onclick="setScreenTimerFromFields()">Set timer</button></div>${dr?`<div class="draft-resolution"><span>Resolution queued for the screen: <strong>${esc(dr.title)}</strong></span><button class="row-btn" type="button" onclick="clearScreenResolution()">Remove</button></div>`:(d.resolutionId?`<div class="draft-resolution"><span>A resolution is queued for the screen.</span><button class="row-btn" type="button" onclick="clearScreenResolution()">Remove</button></div>`:"")}<div id="screenDraftStatus" class="draft-status">${screenDraftStatusHtml(selected)}</div><button class="primary full" onclick="updateScreen()">Update connected screen</button><button class="secondary full" onclick="openScreenWindow()">Open projector / screen window</button>${r?`<div class="panel" style="margin-top:18px"><div class="panel-head"><div><h3>${esc(r.title)}</h3><p>${esc(r.status)}</p></div></div><div class="modal-body"><p class="muted">${esc(r.clauses)}</p><p><strong>Main submitters:</strong> ${(r.main||[]).map(esc).join(", ")||"—"}</p><p><strong>Co-submitters:</strong> ${(r.co||[]).map(esc).join(", ")||"—"}</p></div></div>`:""}</div></div>`;
 }
 
+function changeScreenCommittee(id){id=String(id||"");if(id&&!requireCommitteeAccess(id))return;state.data.screen=id?{...getScreenState(id)}:{...defaultScreenState("")};saveLocalOnly();render()}
+function screenRemaining(s){const t=Math.max(0,Number(s?.timerSeconds)||0);if(!s?.timerRunning||!s.updated)return t;return Math.max(0,t-Math.floor((Date.now()-Number(s.updated))/1000))}
 function screenSelectedId(){return isCommitteeDaisRole()?String(state.assignedCommittee||""):String(document.getElementById("screenCom")?.value||state.data.screen?.committeeId||"");}
 function stageScreenTimer(action){const id=screenSelectedId();if(!id||!requireCommitteeAccess(id))return;saveScreenDraftFromForm();const d=getScreenDraft(id);d.timerAction=action;d.savedAt=Date.now();save();refreshScreenDraftStatus()}
 function setScreenTimerFromFields(){stageScreenTimer("set")}
@@ -909,16 +923,18 @@ async function updateScreen(){
   const id=screenSelectedId();if(!id||!requireCommitteeAccess(id))return alert("Select a committee first.");
   saveScreenDraftFromForm();
   const d=getScreenDraft(id),cur=getScreenState(id),t=x=>String(x||"").trim(),a=d.timerAction;
-  const patch={speaker:t(d.speaker),country:t(d.country),topic:t(d.topic),agenda:t(d.agenda),nextSpeaker:t(d.nextSpeaker),mode:d.mode||"",motion:t(d.motion),resolutionId:d.resolutionId||"",openingSpeechIndex:Number(d.openingSpeechIndex)||0,moderatedSpeakerIndex:Number(d.moderatedSpeakerIndex)||0,moderatedSpeakerQueue:d.mode==="Moderated Caucus"?moderatedSpeakerQueueFromText(d.moderatedText):(cur.moderatedSpeakerQueue||[]),updated:Date.now()};
+  const rem=screenRemaining(cur);const patch={speaker:"",country:t(d.delegation??d.country),delegation:t(d.delegation??d.country),topic:t(d.topic),agenda:"",nextSpeaker:"",mode:d.mode||"",motion:"",timerSeconds:rem,resolutionId:d.resolutionId||"",openingSpeechIndex:Number(d.openingSpeechIndex)||0,moderatedSpeakerIndex:Number(d.moderatedSpeakerIndex)||0,moderatedSpeakerQueue:d.mode==="Moderated Caucus"?moderatedSpeakerQueueFromText(d.moderatedText):(cur.moderatedSpeakerQueue||[]),updated:Date.now()};
   if(a==="start"){patch.timerSeconds=draftTimerSeconds(d,"start");patch.timerRunning=true}
   else if(a==="set"){patch.timerSeconds=draftTimerSeconds(d,"set");patch.timerRunning=false}
-  else if(a==="pause"){patch.timerRunning=false}
+  else if(a==="pause"){patch.timerRunning=false;patch.timerSeconds=rem}
   else if(a==="reset"){patch.timerSeconds=0;patch.timerRunning=false}
-  if(patch.resolutionId&&patch.resolutionId!==String(cur.resolutionId||"")){const r=state.data.resolutions.find(x=>x.id===patch.resolutionId);if(r){r.status="On Chairing Screen";r.screenAt=Date.now();audit("Resolution placed on chairing screen",r.title,r.committee)}}
+  if(cur.resolutionId&&patch.resolutionId!==String(cur.resolutionId)){const old=state.data.resolutions.find(x=>x.id===cur.resolutionId);if(old&&old.status==="On Chairing Screen"){old.status=old.statusBeforeScreen||"Under Review";delete old.statusBeforeScreen;audit("Resolution removed from chairing screen",old.title,old.committee)}}
+  if(patch.resolutionId&&patch.resolutionId!==String(cur.resolutionId||"")){const r=state.data.resolutions.find(x=>x.id===patch.resolutionId);if(r){if(r.status!=="On Chairing Screen")r.statusBeforeScreen=r.status;r.status="On Chairing Screen";r.screenAt=Date.now();audit("Resolution placed on chairing screen",r.title,r.committee)}}
   const next=setScreenState(id,patch);
+  broadcastScreenState(id,next);
   d.timerAction="";
   if(a==="pause"||a==="set"||a==="reset"){const rem=Math.max(0,Number(next.timerSeconds)||0);d.minutes=Math.floor(rem/60);d.seconds=rem%60}
-  d.savedAt=Date.now();
+  d.savedAt=Date.now();d.savedBy=screenEditorName();
   saveLocalOnly();localDirty=true;
   const ok=await publishScreenStateNow(id);render();
   if(!ok)alert("The chairing screen was updated locally, but the connected screen could not be reached. Check Supabase connection.");
@@ -997,6 +1013,7 @@ function projectorCss(){return `
   .screen-brand{display:flex;align-items:center;justify-content:space-between;gap:32px;border-bottom:1px solid rgba(255,255,255,.14);padding-bottom:24px;margin-bottom:42px}
   .screen-brand img{display:block;width:min(420px,34vw);max-height:120px;height:auto;object-fit:contain;filter:none;background:transparent;border-radius:0}
   .screen-brand span{font-size:clamp(18px,2vw,30px);font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.75}
+  html[dir=rtl] .screen-brand span,html[dir=rtl] .screen-committee,html[dir=rtl] .screen-timer{letter-spacing:0}
   .screen-main{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;gap:18px;min-height:0}
   .screen-committee{font-size:clamp(22px,3vw,44px);font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.72}
   .screen-item{font-size:clamp(40px,7vw,104px);line-height:1.05;font-weight:800;max-width:90vw;overflow-wrap:anywhere}
@@ -1007,40 +1024,90 @@ function projectorCss(){return `
   .screen-resolution{display:flex;flex-direction:column;gap:6px;margin-top:22px;padding:16px 24px;border-radius:12px;background:rgba(255,255,255,.06);max-width:80vw}
   .screen-resolution strong{font-size:clamp(20px,2.4vw,34px)}.screen-resolution span{font-size:clamp(16px,1.8vw,24px);opacity:.7}
   @media(max-width:700px){.screen-only{padding:24px}.screen-brand{align-items:flex-start;flex-direction:column}.screen-brand img{width:260px}}`; }
+function projectorLabels(){
+  const L={en:{brand:"CHAIRING PANEL",delegation:"DELEGATION",awaitDel:"Awaiting delegation",awaitTopic:"Awaiting committee activity"},
+    fr:{brand:"PANNEAU DE LA PRÉSIDENCE",delegation:"DÉLÉGATION",awaitDel:"En attente d’une délégation",awaitTopic:"En attente d’une activité du comité"},
+    ar:{brand:"شاشة هيئة الرئاسة",delegation:"الوفد",awaitDel:"بانتظار الوفد",awaitTopic:"بانتظار نشاط اللجنة"}};
+  const lang=L[hhhLanguage]?hhhLanguage:"en";return {lang,...L[lang]};
+}
+function projectorScreenPayload(id,screenState){
+  const c=committee(id),r=(state.data.resolutions||[]).find(x=>x.id===screenState?.resolutionId),lb=projectorLabels();
+  return {lang:lb.lang,labels:lb,
+    committee:String(c?.name||"HHHSMUN"),
+    committeeFullName:String(c?.fullName||""),
+    delegation:String(screenState?.delegation??screenState?.country??""),
+    topic:String(screenState?.topic||c?.fullName||lb.awaitTopic),
+    timerSeconds:Math.max(0,Number(screenState?.timerSeconds)||0),
+    timerRunning:!!screenState?.timerRunning,
+    updated:Number(screenState?.updated)||Date.now(),
+    resolutionTitle:String(r?.title||""),
+    resolutionStatus:String((HHH_PHRASES[lb.lang]||{})[r?.status]||r?.status||"")
+  };
+}
 function renderProjectorScreen(id,screenState,win=screenWindowRef){
   try{
     if(!win||win.closed)return false;
     const root=win.document.getElementById("screenOnly");
     if(!root)return false;
-    const c=committee(id),r=(state.data.resolutions||[]).find(x=>x.id===screenState?.resolutionId);
-    let t=Math.max(0,Number(screenState?.timerSeconds)||0);
-    if(screenState?.timerRunning&&screenState?.updated)t=Math.max(0,t-Math.floor((Date.now()-Number(screenState.updated))/1000));
+    const p=projectorScreenPayload(id,screenState);
+    let t=p.timerSeconds;
+    if(p.timerRunning&&p.updated)t=Math.max(0,t-Math.floor((Date.now()-p.updated)/1000));
     const mm=Math.floor(t/60),ss=t%60;
     const timerText=String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");
-    const sig=JSON.stringify([id,c?.name,c?.fullName,screenState?.speaker,screenState?.country,screenState?.topic,screenState?.agenda,screenState?.nextSpeaker,screenState?.motion,r?.title,r?.status]);
-    if(root.dataset.sig===sig){const te=root.querySelector(".screen-timer");if(te){te.textContent=timerText;return true;}}
+    const sig=JSON.stringify([p.committee,p.delegation,p.topic,p.resolutionTitle,p.resolutionStatus]);
+    if(root.dataset.sig===sig){const te=root.querySelector(".screen-timer");if(te)te.textContent=timerText;return true;}
     root.dataset.sig=sig;
-    root.innerHTML=`<div class="screen-brand"><img class="chairing-logo" src="${PROJECTOR_LOGO_DATA_URL}" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(c?.name||"HHHSMUN")}</div><div class="screen-item">${esc(screenState?.speaker||"Awaiting chair input")}${screenState?.country?` · ${esc(screenState.country)}`:""}</div><div class="screen-topic">${esc(screenState?.topic||c?.fullName||"Awaiting committee activity")}</div>${screenState?.agenda?`<div class="screen-motion"><span>AGENDA</span><strong>${esc(screenState.agenda)}</strong></div>`:""}${screenState?.nextSpeaker?`<div class="screen-motion"><span>NEXT SPEAKER</span><strong>${esc(screenState.nextSpeaker)}</strong></div>`:""}${screenState?.motion?`<div class="screen-motion"><span>CURRENT MOTION</span><strong>${esc(screenState.motion)}</strong></div>`:""}<div class="screen-timer">${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}</div>${r?`<div class="screen-resolution"><strong>${esc(r.title)}</strong><span>${esc(r.status)}</span></div>`:""}</div>`;
+    root.innerHTML=`<div class="screen-brand"><img class="chairing-logo" src="${PROJECTOR_LOGO_DATA_URL}" alt="HHHSMUN"><span>CHAIRING PANEL</span></div><div class="screen-main"><div class="screen-committee">${esc(p.committee)}</div><div class="screen-item"><span style="display:block;font-size:14px;letter-spacing:.16em;font-weight:700;opacity:.6;margin-bottom:8px">DELEGATION</span><strong>${esc(p.delegation||"Awaiting delegation")}</strong></div><div class="screen-topic">${esc(p.topic)}</div><div class="screen-timer">${timerText}</div>${p.resolutionTitle?`<div class="screen-resolution"><strong>${esc(p.resolutionTitle)}</strong><span>${esc(p.resolutionStatus)}</span></div>`:""}</div>`;
     return true;
   }catch(e){console.warn("Projector DOM update failed",e);return false;}
 }
 function buildProjectorWindow(win,id){
   try{
+    const initial=projectorScreenPayload(id,getScreenState(id));
+    const logo=PROJECTOR_LOGO_DATA_URL;
+    const initialJson=JSON.stringify(initial).replace(/</g,"\u003c");
+    const childScript=`(function(){
+      const logoSrc=${JSON.stringify(PROJECTOR_LOGO_DATA_URL)};
+      const escHtml=function(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")};
+      let cur=null,lastSig="";
+      function clockText(p){let t=Math.max(0,Number(p.timerSeconds)||0);if(p.timerRunning&&p.updated)t=Math.max(0,t-Math.floor((Date.now()-Number(p.updated))/1000));return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0")}
+      function draw(p){
+        const root=document.getElementById("screenOnly");if(!root||!p)return;
+        cur=p;
+        const L=p.labels||{},rtl=p.lang==="ar";
+        const sig=JSON.stringify([p.lang,L.brand,p.committee,p.committeeFullName,p.delegation,p.topic,p.resolutionTitle,p.resolutionStatus]);
+        if(sig!==lastSig){lastSig=sig;document.documentElement.lang=p.lang||"en";document.documentElement.dir=rtl?"rtl":"ltr";
+        root.innerHTML='<div class="screen-brand"><img class="chairing-logo" src="'+logoSrc+'" alt="HHHSMUN"><span>'+escHtml(L.brand||"CHAIRING PANEL")+'</span></div><div class="screen-main"><div class="screen-committee">'+escHtml(p.committee||"HHHSMUN")+'</div><div class="screen-item"><span style="display:block;font-size:14px;letter-spacing:'+(rtl?"0":".16em")+';font-weight:700;opacity:.6;margin-bottom:8px">'+escHtml(L.delegation||"DELEGATION")+'</span><strong>'+escHtml(p.delegation||L.awaitDel||"Awaiting delegation")+'</strong></div><div class="screen-topic">'+escHtml(p.topic||p.committeeFullName||L.awaitTopic||"Awaiting committee activity")+'</div><div class="screen-timer">'+clockText(p)+'</div>'+(p.resolutionTitle?'<div class="screen-resolution"><strong>'+escHtml(p.resolutionTitle)+'</strong><span>'+escHtml(p.resolutionStatus||"")+'</span></div>':'')+'</div>';
+        }
+        const te=root.querySelector(".screen-timer");if(te)te.textContent=clockText(p);
+      }
+      setInterval(function(){if(cur)draw(cur)},250);
+      window.addEventListener("message",function(e){if(e&&e.data&&e.data.type==="HHHSMUN_PROJECTOR_STATE")draw(e.data.payload||{});});
+      draw(${initialJson});
+    })();`;
     win.document.open();
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(committee(id)?.name||"HHHSMUN")} — Chairing Screen</title><style>${projectorCss()}</style></head><body><div id="screenOnly" class="screen-only"></div></body></html>`);
+    win.document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(committee(id)?.name||"HHHSMUN")+' — Chairing Screen</title><style>'+projectorCss()+'</style></head><body><div id="screenOnly" class="screen-only"></div><script>'+childScript.replace(/<\/script/gi,'<\/script')+'</scr'+'ipt></body></html>');
     win.document.close();
-    setTimeout(()=>renderProjectorScreen(id,getScreenState(id),win),0);
+    setTimeout(function(){try{win.postMessage({type:"HHHSMUN_PROJECTOR_STATE",payload:projectorScreenPayload(id,getScreenState(id))},"*")}catch(e){}},100);
     return true;
   }catch(e){console.warn("Projector window setup failed",e);return false;}
+}
+function reattachProjector(){
+  try{
+    const id=sessionStorage.getItem("hhhsmun_projector");if(!id||(screenWindowRef&&!screenWindowRef.closed))return;
+    const w=window.open("","hhhsmUNScreen_"+id);if(!w){sessionStorage.removeItem("hhhsmun_projector");return}
+    if(w.document&&w.document.getElementById("screenOnly")){screenWindowRef=w;screenWindowCommitteeId=String(id);broadcastScreenState(id,getScreenState(id))}
+    else{try{w.close()}catch(e){}sessionStorage.removeItem("hhhsmun_projector")}
+  }catch(e){}
 }
 function openScreenWindow(){
   const id=screenSelectedId();
   if(!id||!requireCommitteeAccess(id))return alert("Select a committee first.");
   if(screenWindowRef&&!screenWindowRef.closed&&String(screenWindowCommitteeId)===String(id)){
-    try{screenWindowRef.focus();renderProjectorScreen(id,getScreenState(id),screenWindowRef);}catch(e){}
+    try{screenWindowRef.focus();broadcastScreenState(id,getScreenState(id));}catch(e){}
     return;
   }
-  screenWindowCommitteeId=String(id);
+  screenWindowCommitteeId=String(id);try{sessionStorage.setItem("hhhsmun_projector",String(id))}catch(e){}
   // NEVER reopen this HTML file. about:blank inherits the opener context and
   // lets the chairing page update the projector DOM directly under file://.
   screenWindowRef=window.open("about:blank","hhhsmUNScreen_"+String(id),"width=1400,height=900");
@@ -1051,17 +1118,17 @@ function openScreenWindow(){
     return alert("The projector window could not be initialized. Close the old projector window and try again.");
   }
   try{screenWindowRef.focus();}catch(e){}
-  renderProjectorScreen(id,getScreenState(id),screenWindowRef);
+  broadcastScreenState(id,getScreenState(id));
 }
 
-setInterval(()=>{state.data.screenStates=normalizeScreenStates(state.data.screenStates);let changed=false;for(const id of Object.keys(state.data.screenStates)){const sc=state.data.screenStates[id];if(sc.timerRunning){if((Number(sc.timerSeconds)||0)>0){sc.timerSeconds--;sc.updated=Date.now();changed=true;}else{sc.timerRunning=false;sc.updated=Date.now();changed=true;}}}if(changed){const active=state.data.screen?.committeeId;state.data.screen=active&&state.data.screenStates[active]?{...state.data.screenStates[active]}:state.data.screen;saveLocalOnly();if(remoteReady&&Date.now()-lastRemoteTimerSync>3000){lastRemoteTimerSync=Date.now();pushRemoteState();}if(state.page==="screen"){const el=document.getElementById("chairLiveTimer"),sc=active?state.data.screenStates[active]:null;if(el&&sc){const t=Math.max(0,Number(sc.timerSeconds)||0);el.textContent=String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");}}}},1000);
+setInterval(()=>{state.data.screenStates=normalizeScreenStates(state.data.screenStates);let changed=false;for(const id of Object.keys(state.data.screenStates)){const sc=state.data.screenStates[id];if(!sc.timerRunning)continue;const now=Date.now(),last=Number(sc.updated)||now,el=Math.floor((now-last)/1000);if(el<1)continue;const left=Math.max(0,(Number(sc.timerSeconds)||0)-el);sc.timerSeconds=left;sc.updated=left>0?last+el*1000:now;if(left<=0)sc.timerRunning=false;changed=true;}if(changed){const active=state.data.screen?.committeeId;state.data.screen=active&&state.data.screenStates[active]?{...state.data.screenStates[active]}:state.data.screen;saveLocalOnly();if(remoteReady&&Date.now()-lastRemoteTimerSync>3000){lastRemoteTimerSync=Date.now();pushRemoteState();}if(state.page==="screen"){const el=document.getElementById("chairLiveTimer"),sc=active?state.data.screenStates[active]:null;if(el&&sc){const t=screenRemaining(sc);el.textContent=String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");}}}},1000);
 // Do not re-render the Chairing Panel every second: doing so destroys focus,
 // closes open selects, and interrupts typing. Only refresh the visible live timer text.
 setInterval(()=>{
   if(state.role&&state.page==="screen"){
     const live=document.getElementById("chairLiveTimer");
     if(live){
-      const sid=screenSelectedId(),t=Math.max(0,Number((sid?getScreenState(sid):state.data.screen)?.timerSeconds)||0);
+      const sid=screenSelectedId(),t=screenRemaining(sid?getScreenState(sid):state.data.screen);
       live.textContent=String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");
     }
   }
@@ -1122,8 +1189,14 @@ function langUI(id){const label=hhhLanguage==="fr"?"Langue":hhhLanguage==="ar"?"
 const HHH_TEXT_ORIGINAL=new WeakMap();
 const HHH_PHRASES={
   fr:{
-    "Overview":"Vue d’ensemble","Conference overview":"Vue d’ensemble de la conférence","Committees":"Comités","Committee management":"Gestion des comités","Countries":"Pays","Country registry":"Registre des pays","Staff & Dais":"Personnel et présidence","Delegates":"Délégués","Delegate assignments":"Affectation des délégués","Resolution Papers":"Projets de résolution","Grading":"Évaluation","Committee grading system":"Système d’évaluation des comités","Chairing Screen":"Écran de la présidence","Resources":"Ressources","Conference Resources":"Ressources de la conférence","Logistics Requests":"Demandes de matériel","Logistics request":"Demande de matériel","Committee logistics requests":"Demandes de matériel du comité","Settings":"Paramètres","Finance":"Finance","Training":"Formation","Rapporteurs":"Rapporteurs","My Committee":"Mon comité","Delegate Portal":"Portail des délégués","My Resolution Papers":"Mes projets de résolution","Sign in":"Se connecter","Sign out":"Se déconnecter","Password":"Mot de passe","Role":"Rôle","President":"Président","Deputy President":"Vice-président","Secretary-General":"Secrétaire général","Head of Logistics":"Responsable de la logistique","Head of Finance":"Responsable des finances","Head of Training":"Responsable de la formation","Head of Rapporteurs":"Responsable des rapporteurs","Advisory Panel":"Conseil consultatif","Chair":"Président de comité","Delegate":"Délégué","Search":"Rechercher","Save":"Enregistrer","Save grade":"Enregistrer la note","Delete":"Supprimer","Countries":"Pays","Country":"Pays","Delegate":"Délégué","Delegates":"Délégués","Top 5 countries by average score. Expand to view the top 15.":"Top 5 des pays selon la note moyenne. Développez pour afficher le top 15.","View top 15":"Afficher le top 15","Show top 5":"Afficher le top 5","Average score":"Note moyenne","No grades have been recorded yet.":"Aucune note n’a encore été enregistrée.","No rankings":"Aucun classement","Loading":"Chargement","Uploading file…":"Téléversement du fichier…","Please wait while the file is uploaded.":"Veuillez patienter pendant le téléversement du fichier."},
+    "Next:":"Suivant :","Total expenses":"Total des dépenses","Conference spending":"Dépenses de la conférence","Entries":"Entrées","Recorded expenses":"Dépenses enregistrées","Finance department":"Service des finances","+ Add expense":"+ Ajouter une dépense","No finance entries":"Aucune écriture financière","Add an expense to start tracking conference spending.":"Ajoutez une dépense pour commencer à suivre les dépenses de la conférence.","Export conference data":"Exporter les données de la conférence","Item / expense":"Article / dépense","Category":"Catégorie","Price":"Prix","Edit":"Modifier",
+    "Nothing changes on the connected screen until you press “Update connected screen”":"Rien ne change sur l’écran connecté tant que vous n’appuyez pas sur « Mettre à jour l’écran connecté »","CHAIRING PANEL DISPLAY":"AFFICHAGE DU PANNEAU DE LA PRÉSIDENCE","LIVE":"EN DIRECT","Awaiting delegation":"En attente d’une délégation","No topic set":"Aucun sujet défini","Resolution on display":"Résolution affichée","None":"Aucune","Main":"Principaux","Everything you enter here is a draft: it is saved automatically but only goes to the connected screen when you press Update. Timer buttons are also applied on Update.":"Tout ce que vous saisissez ici est un brouillon : il est enregistré automatiquement, mais n’apparaît sur l’écran connecté que lorsque vous appuyez sur Mettre à jour. Les boutons du minuteur s’appliquent aussi à la mise à jour.","Motion / caucus type":"Motion / type de caucus","Select type":"Choisir le type","Opening Speech":"Discours d’ouverture","Moderated Caucus":"Caucus modéré","Unmoderated Caucus":"Caucus non modéré","General Speakers List":"Liste générale des orateurs","Voting":"Vote","Other":"Autre","Resolution for review":"Résolution à examiner","Opening Speech Queue":"File des discours d’ouverture","Next Country":"Pays suivant","Restart Opening":"Recommencer l’ouverture","Countries are called automatically in alphabetical order. Each Next Country prepares the speaker with a fixed 1:00 timer — press Update to show it.":"Les pays sont appelés automatiquement par ordre alphabétique. Chaque « Pays suivant » prépare l’orateur avec un minuteur fixe de 1:00 — appuyez sur Mettre à jour pour l’afficher.","Moderated Caucus Speaker List":"Liste des orateurs du caucus modéré","Next Speaker":"Orateur suivant","Restart List":"Recommencer la liste","Speakers (one per line; optional format: Speaker — Country)":"Orateurs (un par ligne ; format facultatif : Orateur — Pays)","Add one speaker per line, then press Next Speaker.":"Ajoutez un orateur par ligne, puis appuyez sur Orateur suivant.","The Next Speaker button follows the order you type. The timer is not changed automatically for moderated caucus.":"Le bouton Orateur suivant suit l’ordre saisi. Le minuteur n’est pas modifié automatiquement pour le caucus modéré.","Draft saved automatically at":"Brouillon enregistré automatiquement à","It stays here if you leave this page and come back.":"Il reste ici si vous quittez cette page et revenez.","Pending:":"En attente :","Timer will start at":"Le minuteur démarrera à","Timer will be set to":"Le minuteur sera réglé sur","Timer will pause":"Le minuteur sera mis en pause","Timer will reset to 00:00":"Le minuteur sera remis à 00:00","Resolution queued for the screen:":"Résolution en attente d’affichage :","A resolution is queued for the screen.":"Une résolution est en attente d’affichage.","Remove":"Retirer","Main submitters:":"Soumetteurs principaux :","Co-submitters:":"Co-soumetteurs :","Committee":"Comité","President / Deputy / Chair":"Président / Vice-président / Président de comité","paid":"payés","Mark each delegate as Paid or Not paid. Changes are saved as soon as you tap.":"Marquez chaque délégué comme Payé ou Non payé. Les modifications sont enregistrées dès que vous appuyez.","Record conference expenses and their prices. Changes are saved when you press Save.":"Enregistrez les dépenses de la conférence et leurs prix. Les modifications sont enregistrées lorsque vous appuyez sur Enregistrer.","No delegates assigned to this committee yet.":"Aucun délégué n’est encore affecté à ce comité.","Paid":"Payé","Draft":"Brouillon","Under Review":"En cours d’examen","Approved":"Approuvée","Passed":"Adoptée","On Chairing Screen":"Sur l’écran de la présidence","Present":"Présent","Absent":"Absent","Logistics requests":"Demandes de matériel","Grading analytics":"Analyses des évaluations","Chairing screen":"Écran de la présidence","Conference management":"Gestion de la conférence","Use the navigation to manage your assigned conference functions.":"Utilisez le menu pour gérer les fonctions de la conférence qui vous sont confiées.","Presidents, deputies, chairs and conference staff":"Présidents, vice-présidents, présidents de comité et personnel de la conférence","Main and co-submitter workflow":"Suivi des soumetteurs principaux et des co-soumetteurs","Live chairing panel display":"Affichage en direct du panneau de la présidence","Background guides and conference files":"Guides d’information et fichiers de la conférence","Committee supply requests and notifications":"Demandes de matériel des comités et notifications","Data & settings":"Données et paramètres","Committee control panel":"Panneau de contrôle du comité","Delegate resolution paper submission":"Soumission des projets de résolution par les délégués","Submitted resolution papers":"Projets de résolution soumis","Administration sign in":"Connexion de l’administration","Authorized conference staff only.":"Réservé au personnel autorisé de la conférence.","Manage":"Gérer","Open logistics":"Ouvrir la logistique","Conference structure":"Structure de la conférence","Every committee is created and controlled here.":"Tous les comités sont créés et gérés ici.","Create your committees from the Committees tab.":"Créez vos comités depuis l’onglet Comités.","No committees yet":"Aucun comité pour le moment","Submit materials needed by any committee and send the request directly to Head of Logistics.":"Soumettez le matériel nécessaire à un comité et envoyez la demande directement au responsable de la logistique.","SUPER ADMINISTRATOR":"SUPER ADMINISTRATEUR","FULL ACCESS":"ACCÈS COMPLET","Configured":"Configurés","Configured by your team":"Configuré par votre équipe","Registered":"Enregistrés","Submitted":"Soumis","No countries":"Aucun pays","No delegates":"Aucun délégué","New logistics request":"Nouvelle demande de matériel","Mark notifications read":"Marquer les notifications comme lues","Enter a committee grading room":"Entrer dans la salle d’évaluation d’un comité","Exit grading":"Quitter l’évaluation","Country-based grading · Arabic rubric":"Évaluation par pays · grille en arabe","Country-based grading · English rubric":"Évaluation par pays · grille en anglais","Country-based grading · French rubric":"Évaluation par pays · grille en français","Search country or delegate…":"Rechercher un pays ou un délégué…","countries":"pays","grades":"notes","grade":"note","Notes":"Remarques","Page error":"Erreur de page","The page could not be rendered.":"La page n’a pas pu être affichée.","Select committee":"Choisir le comité","Committee grading password":"Mot de passe d’évaluation du comité","Enter grading system":"Accéder au système d’évaluation","The selected website language controls the grading rubric.":"La langue choisie pour le site détermine la grille d’évaluation.","Assign countries to this committee first.":"Affectez d’abord des pays à ce comité.","Language":"Langue","Language / Langue / اللغة":"Langue",
+    "Chair controls":"Contrôles de la présidence","Update connected screen":"Mettre à jour l’écran connecté","Open projector / screen window":"Ouvrir la fenêtre de projection / d’écran","On the connected screen now":"Sur l’écran connecté maintenant","Delegation":"Délégation","Topic":"Sujet","Minutes":"Minutes","Seconds":"Secondes","Start":"Démarrer","Pause":"Pause","Reset":"Réinitialiser","Set timer":"Régler le minuteur","Not paid":"Non payé","✓ Paid":"✓ Payé","Delegate payment checklist":"Liste de paiement des délégués","delegates paid":"délégués ayant payé","Delegates paid":"Délégués ayant payé","Payment checklist":"Liste de paiement","Connected screen is up to date":"L’écran connecté est à jour","Unpublished changes — the connected screen has NOT changed yet":"Modifications non publiées — l’écran connecté n’a PAS encore changé","Search delegate, country or committee...":"Rechercher un délégué, un pays ou un comité...",
+    "Overview":"Vue d’ensemble","Conference overview":"Vue d’ensemble de la conférence","Committees":"Comités","Committee management":"Gestion des comités","Country registry":"Registre des pays","Staff & Dais":"Personnel et présidence","Delegate assignments":"Affectation des délégués","Resolution Papers":"Projets de résolution","Grading":"Évaluation","Committee grading system":"Système d’évaluation des comités","Chairing Screen":"Écran de la présidence","Resources":"Ressources","Conference Resources":"Ressources de la conférence","Logistics Requests":"Demandes de matériel","Logistics request":"Demande de matériel","Committee logistics requests":"Demandes de matériel du comité","Settings":"Paramètres","Finance":"Finance","Training":"Formation","Rapporteurs":"Rapporteurs","My Committee":"Mon comité","Delegate Portal":"Portail des délégués","My Resolution Papers":"Mes projets de résolution","Sign in":"Se connecter","Sign out":"Se déconnecter","Password":"Mot de passe","Role":"Rôle","President":"Président","Deputy President":"Vice-président","Secretary-General":"Secrétaire général","Head of Logistics":"Responsable de la logistique","Head of Finance":"Responsable des finances","Head of Training":"Responsable de la formation","Head of Rapporteurs":"Responsable des rapporteurs","Advisory Panel":"Conseil consultatif","Chair":"Président de comité","Search":"Rechercher","Save":"Enregistrer","Save grade":"Enregistrer la note","Delete":"Supprimer","Countries":"Pays","Country":"Pays","Delegate":"Délégué","Delegates":"Délégués","Top 5 countries by average score. Expand to view the top 15.":"Top 5 des pays selon la note moyenne. Développez pour afficher le top 15.","View top 15":"Afficher le top 15","Show top 5":"Afficher le top 5","Average score":"Note moyenne","No grades have been recorded yet.":"Aucune note n’a encore été enregistrée.","No rankings":"Aucun classement","Loading":"Chargement","Uploading file…":"Téléversement du fichier…","Please wait while the file is uploaded.":"Veuillez patienter pendant le téléversement du fichier."},
   ar:{
+    "Next:":"التالي:","Total expenses":"إجمالي المصاريف","Conference spending":"نفقات المؤتمر","Entries":"السجلات","Recorded expenses":"المصاريف المسجّلة","Finance department":"قسم الشؤون المالية","+ Add expense":"+ إضافة مصروف","No finance entries":"لا توجد سجلات مالية","Add an expense to start tracking conference spending.":"أضف مصروفًا لبدء تتبّع نفقات المؤتمر.","Export conference data":"تصدير بيانات المؤتمر","Item / expense":"البند / المصروف","Category":"الفئة","Price":"السعر","Edit":"تعديل",
+    "Nothing changes on the connected screen until you press “Update connected screen”":"لن يتغير شيء على الشاشة المتصلة حتى تضغط على «تحديث الشاشة المتصلة»","CHAIRING PANEL DISPLAY":"شاشة هيئة الرئاسة","LIVE":"مباشر","Awaiting delegation":"بانتظار الوفد","No topic set":"لم يتم تحديد موضوع","Resolution on display":"مشروع القرار المعروض","None":"لا يوجد","Main":"الرئيسيون","Everything you enter here is a draft: it is saved automatically but only goes to the connected screen when you press Update. Timer buttons are also applied on Update.":"كل ما تدخله هنا مسودة: تُحفظ تلقائيًا ولا تظهر على الشاشة المتصلة إلا عند الضغط على تحديث. وتُطبَّق أزرار المؤقت عند التحديث أيضًا.","Motion / caucus type":"الاقتراح / نوع الجلسة غير الرسمية","Select type":"اختر النوع","Opening Speech":"كلمة الافتتاح","Moderated Caucus":"جلسة مشاورات منظَّمة","Unmoderated Caucus":"جلسة مشاورات غير منظَّمة","General Speakers List":"قائمة المتحدثين العامة","Voting":"التصويت","Other":"أخرى","Resolution for review":"مشروع قرار قيد المراجعة","Opening Speech Queue":"قائمة كلمات الافتتاح","Next Country":"الدولة التالية","Restart Opening":"إعادة بدء الافتتاح","Countries are called automatically in alphabetical order. Each Next Country prepares the speaker with a fixed 1:00 timer — press Update to show it.":"تُستدعى الدول تلقائيًا بالترتيب الأبجدي. يجهّز زر «الدولة التالية» المتحدث بمؤقت ثابت مدته 1:00 — اضغط تحديث لعرضه.","Moderated Caucus Speaker List":"قائمة متحدثي الجلسة المنظَّمة","Next Speaker":"المتحدث التالي","Restart List":"إعادة بدء القائمة","Speakers (one per line; optional format: Speaker — Country)":"المتحدثون (واحد في كل سطر؛ الصيغة الاختيارية: المتحدث — الدولة)","Add one speaker per line, then press Next Speaker.":"أضف متحدثًا في كل سطر، ثم اضغط «المتحدث التالي».","The Next Speaker button follows the order you type. The timer is not changed automatically for moderated caucus.":"يتبع زر «المتحدث التالي» الترتيب الذي تكتبه. لا يتغير المؤقت تلقائيًا في الجلسة المنظَّمة.","Draft saved automatically at":"تم حفظ المسودة تلقائيًا في","It stays here if you leave this page and come back.":"تبقى هنا إذا غادرت هذه الصفحة وعدت إليها.","Pending:":"قيد الانتظار:","Timer will start at":"سيبدأ المؤقت من","Timer will be set to":"سيُضبط المؤقت على","Timer will pause":"سيتوقف المؤقت مؤقتًا","Timer will reset to 00:00":"سيُعاد ضبط المؤقت إلى 00:00","Resolution queued for the screen:":"مشروع قرار بانتظار العرض على الشاشة:","A resolution is queued for the screen.":"هناك مشروع قرار بانتظار العرض على الشاشة.","Remove":"إزالة","Main submitters:":"مقدّمو المشروع الرئيسيون:","Co-submitters:":"المشاركون في التقديم:","President / Deputy / Chair":"الرئيس / النائب / رئيس اللجنة","paid":"مدفوع","Mark each delegate as Paid or Not paid. Changes are saved as soon as you tap.":"حدّد كل مندوب كمدفوع أو غير مدفوع. تُحفظ التغييرات فور الضغط.","Record conference expenses and their prices. Changes are saved when you press Save.":"سجّل مصاريف المؤتمر وأسعارها. تُحفظ التغييرات عند الضغط على حفظ.","No delegates assigned to this committee yet.":"لا يوجد مندوبون مسجّلون في هذه اللجنة بعد.","Paid":"مدفوع","Draft":"مسودة","Under Review":"قيد المراجعة","Approved":"موافق عليه","Passed":"تم إقراره","On Chairing Screen":"على شاشة هيئة الرئاسة","Present":"حاضر","Absent":"غائب","Grading analytics":"تحليلات التقييم","Chairing screen":"شاشة هيئة الرئاسة","Head of Finance":"رئيس قسم الشؤون المالية",
+    "Chair controls":"أدوات تحكم رئيس اللجنة","Update connected screen":"تحديث الشاشة المتصلة","Open projector / screen window":"فتح نافذة العرض / الشاشة","On the connected screen now":"على الشاشة المتصلة الآن","Delegation":"الوفد","Topic":"الموضوع","Minutes":"دقائق","Seconds":"ثوانٍ","Start":"ابدأ","Pause":"إيقاف مؤقت","Reset":"إعادة ضبط","Set timer":"ضبط المؤقت","Not paid":"غير مدفوع","✓ Paid":"✓ مدفوع","Delegate payment checklist":"قائمة دفع المندوبين","delegates paid":"مندوبون دفعوا","Delegates paid":"المندوبون الذين دفعوا","Payment checklist":"قائمة الدفع","Connected screen is up to date":"الشاشة المتصلة محدّثة","Unpublished changes — the connected screen has NOT changed yet":"تغييرات غير منشورة — لم تتغير الشاشة المتصلة بعد","Search delegate, country or committee...":"ابحث عن مندوب أو دولة أو لجنة...",
     "Overview":"نظرة عامة",
     "Conference overview":"نظرة عامة على المؤتمر",
     "Conference management":"إدارة المؤتمر",
@@ -1186,7 +1259,6 @@ const HHH_PHRASES={
     "Head of Training":"رئيس قسم التدريب",
     "Head of Rapporteurs":"رئيس قسم المقررين",
     "Advisory Panel":"المجلس الاستشاري",
-    "Delegate":"مندوب",
     "SUPER ADMINISTRATOR":"مدير النظام",
     "FULL ACCESS":"صلاحية كاملة",
     "Configured":"تم الإعداد",
@@ -1202,7 +1274,6 @@ const HHH_PHRASES={
     "Average score":"متوسط العلامة",
     "No grades have been recorded yet.":"لم يتم تسجيل أي علامات بعد.",
     "No rankings":"لا يوجد ترتيب بعد",
-    "No countries":"لا توجد دول",
     "No delegates":"لا يوجد مندوبون",
     "Loading":"جارٍ التحميل",
     "Uploading file…":"جارٍ رفع الملف…",
@@ -1231,6 +1302,20 @@ const HHH_PHRASES={
     "Language / Langue / اللغة":"اللغة"
   }
 };
+const HHH_COMPILED={};
+function hhhCompiled(lang){
+  if(HHH_COMPILED[lang])return HHH_COMPILED[lang];
+  const map=HHH_PHRASES[lang]||{};
+  return HHH_COMPILED[lang]=Object.entries(map).sort((a,b)=>b[0].length-a[0].length).map(([from,to])=>{
+    const esc=from.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const pre=/^[A-Za-z]/.test(from),post=/[A-Za-z]$/.test(from);
+    return {re:new RegExp((pre?"(^|[^A-Za-z])":"")+esc+(post?"(?![A-Za-z])":""),"g"),to,pre};
+  });
+}
+function hhhTranslateText(value,lang){
+  hhhCompiled(lang).forEach(r=>{value=value.replace(r.re,(m,p1)=>r.pre?p1+r.to:r.to)});
+  return value;
+}
 function applyHHHLang(){
   const isArabic=hhhLanguage==="ar";
   document.documentElement.lang=hhhLanguage;
@@ -1245,9 +1330,7 @@ function applyHHHLang(){
     const original=HHH_TEXT_ORIGINAL.get(node);
     if(!original || !original.trim()) return;
     if(hhhLanguage==="en"){ node.nodeValue=original; return; }
-    let value=original;
-    Object.entries(map).sort((a,b)=>b[0].length-a[0].length).forEach(([from,to])=>{ value=value.split(from).join(to); });
-    node.nodeValue=value;
+    node.nodeValue=hhhTranslateText(original,hhhLanguage);
   });
   const roleLabels={
     en:{president:"President",deputy:"Deputy President",sg:"Secretary-General",logistics:"Head of Logistics",finance:"Head of Finance",training:"Head of Training",rapporteur:"Head of Rapporteurs",advisory:"Advisory Panel",chair:"Chair",delegate:"Delegate"},
@@ -1471,7 +1554,7 @@ window.addEventListener("DOMContentLoaded",()=>{
 
 // Chairing fields are not published while typing. Only the explicit Update button publishes them.
 document.addEventListener("input",screenDraftEvent);document.addEventListener("change",screenDraftEvent);
-function screenDraftEvent(e){const t=e.target;if(state.page!=="screen"||!t||!t.id||!/^screen(Speaker|Country|Topic|Agenda|NextSpeaker|Mode|Motion|ModeratedSpeakers|Minutes|Seconds)$/.test(t.id))return;saveScreenDraftFromForm();refreshScreenDraftStatus()}
+function screenDraftEvent(e){const t=e.target;if(state.page!=="screen"||!t||!t.id||!/^screen(Country|Topic|Mode|ModeratedSpeakers|Minutes|Seconds)$/.test(t.id))return;saveScreenDraftFromForm();refreshScreenDraftStatus()}
 
 </script>
 
