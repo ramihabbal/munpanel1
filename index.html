@@ -389,8 +389,8 @@ const loginPasswords={
 window.roles={
   president:{label:"President",name:"President",avatar:"P",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
   deputy:{label:"Deputy President",name:"Deputy President",avatar:"DP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
-  sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
-  logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"],["settings","Settings"]]},
+  sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
+  logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"],["settings","Settings"]]},
   finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
   // Head of Training
   training:{
@@ -405,6 +405,7 @@ window.roles={
       ["delegates","Delegates"],
       ["resolutions","Resolution Papers"],
       ["grading","Grading"],
+      ["gradingSystems","Grading Systems"],
       ["training","Training"],
       ["resources","Resources"],
       ["notifications","Notifications"],
@@ -443,7 +444,7 @@ window.roles={
       ["notifications","Notifications"]
     ]
   },
-  advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
+  advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
   chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
   delegate:{label:"Delegate",name:"Delegate",avatar:"D",pages:[["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["resources","Resources"]]}
 };
@@ -589,7 +590,7 @@ async function login(){
 }
 function logout(){state.role=null;state.assignedCommittee="";document.getElementById("appView").classList.add("hidden");document.getElementById("loginView").classList.remove("hidden");document.getElementById("password").value="";if(document.getElementById("loginCommittee"))document.getElementById("loginCommittee").value="";updateLoginCommitteeOptions()}
 function renderShell(){const r=window.roles[state.role];document.getElementById("roleChip").textContent=r.label;document.getElementById("userName").textContent=r.name;document.getElementById("avatar").textContent=r.avatar;document.getElementById("nav").innerHTML=r.pages.map(p=>{const badge=p[0]==="notifications"?notificationUnreadCount():0;return `<button class="nav-item ${state.page===p[0]?'active':''}" onclick="go('${p[0]}')"><span>${icon(p[0])}</span>${p[1]}${badge?` <span class="nav-badge">${badge>99?"99+":badge}</span>`:""}</button>`}).join("")}
-function icon(p){return ({overview:"⌂",committees:"▦",countries:"◎",staff:"♜",delegates:"♙",resolutions:"§",grading:"★",screen:"◉",mycommittee:"▦",delegatePortal:"§",myResolutions:"▤",finance:"$",training:"T",rapporteur:"R",resources:"▤",logisticsRequests:"!",notifications:"🔔",tasks:"✓",timeline:"◷",audit:"▤",settings:"⚙"})[p]||"•"}
+function icon(p){return ({overview:"⌂",committees:"▦",countries:"◎",staff:"♜",delegates:"♙",resolutions:"§",grading:"★",gradingSystems:"⚙",screen:"◉",mycommittee:"▦",delegatePortal:"§",myResolutions:"▤",finance:"$",training:"T",rapporteur:"R",resources:"▤",logisticsRequests:"!",notifications:"🔔",tasks:"✓",timeline:"◷",audit:"▤",settings:"⚙"})[p]||"•"}
 function go(p){
   const allowed=window.roles[state.role]?.pages?.some(x=>x[0]===p);
   if(!allowed){console.warn("Blocked unauthorized page access:",p);return;}
@@ -639,7 +640,7 @@ function sendLeadershipNotification(){
   save(); closeModal(); renderShell(); render();
   alert("Notification sent to the Dais.");
 }
-function render(){const titles={overview:["Overview","Conference overview"],committees:["Committees","Committee management"],countries:["Countries","Country registry"],staff:["Staff & Dais","Presidents, deputies, chairs and conference staff"],delegates:["Delegates","Delegate assignments"],resolutions:["Resolution Papers","Main and co-submitter workflow"],grading:["Grading","Committee grading system"],screen:["Chairing Screen","Live chairing panel display"],mycommittee:["My Committee","Committee control panel"],delegatePortal:["Delegate Portal","Delegate resolution paper submission"],myResolutions:["My Resolution Papers","Submitted resolution papers"],finance:["Finance","Finance department"],training:["Training","Training department"],rapporteur:["Rapporteurs","Rapporteur department"],resources:["Conference Resources","Background guides and conference files"],logisticsRequests:["Logistics Requests","Committee supply requests and notifications"],notifications:["Notifications","Messages from conference leadership"],settings:["Data & settings","Local conference data"],tasks:["Tasks","Committee and conference task management"],timeline:["Committee Timeline","Live committee event timeline"],audit:["Activity Log","Conference activity and audit trail"]};const t=titles[state.page]||titles.overview;document.getElementById("pageName").textContent=t[0];document.getElementById("pageTitle").textContent=t[1];const pageRenderer=Object.prototype.hasOwnProperty.call(pages,state.page)?pages[state.page]:pages.overview;try{document.getElementById("content").innerHTML=pageRenderer();if(notificationUnreadCount()&&state.page!=="notifications"){document.getElementById("content").insertAdjacentHTML("afterbegin",`<div class="panel notification-banner"><div><strong>You have ${notificationUnreadCount()} unread notification${notificationUnreadCount()===1?"":"s"}.</strong><p>Conference leadership sent you a message.</p></div><button class="primary" onclick="go(\'notifications\')">Open notifications</button></div>`)} }catch(err){console.error("Page render failed:",state.page,err);document.getElementById("content").innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Page error</h3><p>The ${esc(t[0])} page could not be rendered.</p></div></div><pre style="white-space:pre-wrap;color:#b91c1c">${esc(err?.message||String(err))}</pre></div>`;}renderRemoteStatus();if(state.page==="delegatePortal"){populateDelegateSubmitters();const dc=document.getElementById("dpCom");if(dc)dc.onchange=populateDelegateSubmitters}}
+function render(){const titles={overview:["Overview","Conference overview"],committees:["Committees","Committee management"],countries:["Countries","Country registry"],staff:["Staff & Dais","Presidents, deputies, chairs and conference staff"],delegates:["Delegates","Delegate assignments"],resolutions:["Resolution Papers","Main and co-submitter workflow"],grading:["Grading","Committee grading system"],gradingSystems:["Grading Systems","Create and assign custom grading rubrics"],screen:["Chairing Screen","Live chairing panel display"],mycommittee:["My Committee","Committee control panel"],delegatePortal:["Delegate Portal","Delegate resolution paper submission"],myResolutions:["My Resolution Papers","Submitted resolution papers"],finance:["Finance","Finance department"],training:["Training","Training department"],rapporteur:["Rapporteurs","Rapporteur department"],resources:["Conference Resources","Background guides and conference files"],logisticsRequests:["Logistics Requests","Committee supply requests and notifications"],notifications:["Notifications","Messages from conference leadership"],settings:["Data & settings","Local conference data"],tasks:["Tasks","Committee and conference task management"],timeline:["Committee Timeline","Live committee event timeline"],audit:["Activity Log","Conference activity and audit trail"]};const t=titles[state.page]||titles.overview;document.getElementById("pageName").textContent=t[0];document.getElementById("pageTitle").textContent=t[1];const pageRenderer=Object.prototype.hasOwnProperty.call(pages,state.page)?pages[state.page]:pages.overview;try{document.getElementById("content").innerHTML=pageRenderer();if(notificationUnreadCount()&&state.page!=="notifications"){document.getElementById("content").insertAdjacentHTML("afterbegin",`<div class="panel notification-banner"><div><strong>You have ${notificationUnreadCount()} unread notification${notificationUnreadCount()===1?"":"s"}.</strong><p>Conference leadership sent you a message.</p></div><button class="primary" onclick="go(\'notifications\')">Open notifications</button></div>`)} }catch(err){console.error("Page render failed:",state.page,err);document.getElementById("content").innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Page error</h3><p>The ${esc(t[0])} page could not be rendered.</p></div></div><pre style="white-space:pre-wrap;color:#b91c1c">${esc(err?.message||String(err))}</pre></div>`;}renderRemoteStatus();if(state.page==="delegatePortal"){populateDelegateSubmitters();const dc=document.getElementById("dpCom");if(dc)dc.onchange=populateDelegateSubmitters}}
 function empty(title,text){return `<div class="empty-state"><strong>${title}</strong><p>${text}</p></div>`}
 function modal(title,body){document.getElementById("modal")?.remove();document.body.insertAdjacentHTML("beforeend",`<div id="modal" class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="panel-head"><h3>${title}</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">${body}</div></div></div>`)}
 function closeModal(){document.getElementById("modal")?.remove()}
@@ -656,6 +657,28 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function committee(id){return state.data.committees.find(c=>c.id===id);}
 function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","globalvillage","advisory","chair"].includes(state.role);}
 function canManage(){return ["president","deputy","sg","logistics","advisory","chair"].includes(state.role);}
+function canManageGradingSystems(){return ["sg","logistics","training","advisory"].includes(state.role);}
+function gradingSystemCommitteeIds(system){
+  if(!system||typeof system!=="object")return [];
+  const ids=Array.isArray(system.committeeIds)?system.committeeIds.map(String):[];
+  if(system.committee!=null&&String(system.committee))ids.push(String(system.committee));
+  return [...new Set(ids)];
+}
+function gradingSystemName(system){
+  const raw=String(system?.name||system?.title||system?.sourceFile||"").trim();
+  return raw.replace(/\.(xlsx|xls)$/i,"")||"Unnamed grading system";
+}
+function gradingSystemRubric(system,language="en"){
+  const r=system?.rubric;
+  const chosen=Array.isArray(r)?r:(r&&typeof r==="object"?(r?.[language]||r?.en||[]):[]);
+  return normalizeRubric(chosen);
+}
+function gradingSystemForCommittee(cid){
+  const id=String(cid||"");
+  const systems=Array.isArray(state.data.gradingSystems)?state.data.gradingSystems:[];
+  return systems.find(system=>gradingSystemCommitteeIds(system).includes(id))||null;
+}
+
 function isCommitteeDaisRole(){return ["president","deputy","chair"].includes(state.role);}
 function currentUserCommitteeId(){return isCommitteeDaisRole()?String(state.assignedCommittee||""):"";}
 function visibleCommittees(){const id=currentUserCommitteeId();return id?state.data.committees.filter(c=>c.id===id):state.data.committees;}
@@ -705,6 +728,7 @@ const pages={
  delegates:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'delegateTable')" placeholder="Search delegates..."></div>${canManage()?`<button class="primary" onclick="openDelegate()">+ Add delegate</button>`:""}</div><div class="panel table-panel"><table id="delegateTable"><thead><tr><th>Name</th><th>Country</th><th>Committee</th><th></th></tr></thead><tbody>${scopedItems(state.data.delegates).map(d=>`<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</td><td>${esc(committee(d.committee)?.name||"")}</td><td>${canManage()?`<button class="row-btn" onclick="openDelegate('${d.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('delegates','${d.id}')">Delete</button>`:""}</td></tr>`).join("")}</tbody></table>${!state.data.delegates.length?empty("No delegates","Add delegates after creating committees and countries."):""}</div>`,
  resolutions:()=>{const incoming=scopedItems(state.data.resolutions).filter(r=>r.status!=="Archived");return `<div class="permission-banner"><div><strong>Resolution paper workflow</strong><p>Delegates submit papers with one or more main submitters and co-submitters. The paper becomes visible to the Secretary-General and the assigned chairing panel for review.</p></div><span>DELEGATE → SG → CHAIRING PANEL</span></div><div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'resolutionTable')" placeholder="Search papers, committees or submitters..."></div></div><div class="panel table-panel"><table id="resolutionTable"><thead><tr><th>Paper</th><th>Committee</th><th>Main submitters</th><th>Co-submitters</th><th>Status</th><th>Actions</th></tr></thead><tbody>${incoming.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${r.fileName?`<button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button>`:esc(r.clauses||"")}</small></td><td>${esc(committee(r.committee)?.name||"")}</td><td>${(r.main||[]).map(esc).join(", ")||"—"}</td><td>${(r.co||[]).map(esc).join(", ")||"—"}</td><td><span class="status ${r.status.toLowerCase().replaceAll(" ","-")}">${esc(r.status)}</span></td><td>${["president","deputy","sg","rapporteur","chair"].includes(state.role)?`<button class="row-btn" onclick="openResolution('${r.id}')">Review</button>`:""}</td></tr>`).join("")}</tbody></table>${!incoming.length?empty("No resolution papers","Submitted papers will appear here."):""}</div>`},
  grading:()=>`<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>Enter a committee grading room</h3><p>Use the private grading password provided to your committee.</p></div>${canManage()?`<button class="secondary" onclick="openRubricImport()">Import Excel grading system</button>`:""}</div>${state.gradingCommittee?gradingRoom():`<div class="panel"><div class="modal-body">${selectField("Committee","gradeCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}${formField("Committee grading password","gradePass",`type="password" placeholder="Enter private password" autocomplete="off"`)}<button class="primary full" onclick="enterGrading()">Enter grading system</button></div></div>`}`,
+ gradingSystems:()=>gradingSystemsPage(),
  screen:()=>screenPage(),
  mycommittee:()=>{const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name)||state.data.staff.find(s=>s.role==="Chair");return mine?committeePanel(mine.committee):empty("No committee assigned","Your Chair account has not been assigned to a committee yet.")},
   delegatePortal:()=>`<div class="permission-banner"><div><strong>Delegate resolution portal</strong><p>Upload your resolution paper as a PDF or Word document. Select the main submitters and co-submitters. The paper is routed to the Secretary-General and assigned chairing panel.</p></div><span>UPLOAD → SG → CHAIR</span></div><div class="panel"><div class="panel-head"><div><h3>New resolution paper</h3><p>Accepted formats: PDF, DOC, DOCX · Maximum size: 20 MB.</p></div></div><div class="modal-body">${formField("Resolution title","dpTitle",`placeholder="Draft resolution title"`)}${selectField("Committee","dpCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}<label class="form-label">Main submitters</label><select id="dpMain" class="form-input" multiple size="5"></select><label class="form-label">Co-submitters</label><select id="dpCo" class="form-input" multiple size="6"></select><label class="form-label">Resolution paper file</label><input id="dpFile" class="form-input file-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="showSelectedFile(this)"><div id="dpFileInfo" class="file-info">No file selected.</div><button class="primary full" onclick="submitDelegateResolution()">Upload and submit to SG and Chairing Panel</button></div></div>`,
@@ -1469,7 +1493,7 @@ function canAccessCommitteeGrading(cid){
   return false;
 }
 function normalizeRubric(rubric){return (Array.isArray(rubric)?rubric:[]).map(c=>({name:String(c?.name||"Untitled category"),max:Number(c?.max)||0,criteria:(Array.isArray(c?.criteria)?c.criteria:[]).map(x=>[String(x?.[0]??x?.name??"Criterion"),Number(x?.[1]??x?.max)||0]).filter(x=>x[1]>=0)})).filter(c=>c.criteria.length)}
-function committeeRubric(cid,language=hhhLanguage){const custom=Array.isArray(state.data.gradingSystems)?state.data.gradingSystems.find(x=>x.committee===String(cid)):null;const imported=custom?.rubric;const chosen=imported?.[language]||imported?.en||(Array.isArray(imported)?imported:null);return normalizeRubric(chosen||gradeRubrics[language]||gradeRubrics.en)}
+function committeeRubric(cid,language=hhhLanguage){const custom=gradingSystemForCommittee(cid);const chosen=custom?gradingSystemRubric(custom,language):null;return normalizeRubric(chosen?.length?chosen:(gradeRubrics[language]||gradeRubrics.en))}
 function hRubric(cid){return committeeRubric(cid,state.gradingLanguage||hhhLanguage)}
 function rubricTotal(rubric){return normalizeRubric(rubric).reduce((s,c)=>s+c.criteria.reduce((x,[n,m])=>x+Number(m||0),0),0)}
 function hId(v){return String(v).replace(/[^a-zA-Z0-9_-]/g,"_")}
@@ -1478,6 +1502,100 @@ function criterionValue(g,ci,ri,name){const key=criterionKey(ci,ri);if(g?.criter
 function hGrade(cid,country){return state.data.grades.find(g=>g.committee===cid&&g.country===country&&g.rubricLanguage===hhhLanguage)||{}}
 function hTotal(g,cid){const rubric=hRubric(cid);return rubric.reduce((s,c,ci)=>s+c.criteria.reduce((x,[n,m],ri)=>x+Math.max(0,Math.min(m,Number(criterionValue(g,ci,ri,n))||0)),0),0)}
 let openGradeCountries=new Set(); function setGradeCountryOpen(countryId,isOpen){if(isOpen)openGradeCountries.add(countryId);else openGradeCountries.delete(countryId)} function updateCountryGradeTotal(countryId,cid=state.gradingCommittee){let t=0;hRubric(cid).forEach((c,ci)=>c.criteria.forEach(([n,m],ri)=>{const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`);t+=Math.max(0,Math.min(m,Number(e?.value)||0))}));const o=document.getElementById(`gt_${hId(countryId)}`);if(o)o.textContent=`${t}/${rubricTotal(hRubric(cid))}`}
+
+function gradingBuilderRow(item="",max=""){
+  const rid=uid();
+  return `<div class="grading-builder-row" data-row-id="${rid}" style="display:grid;grid-template-columns:minmax(0,1fr) 120px 80px;gap:10px;align-items:end;margin-bottom:10px">
+    <div><label class="form-label">Graded item</label><input class="form-input gs-item" value="${esc(item)}" placeholder="e.g. Speeches, negotiation, crisis response"></div>
+    <div><label class="form-label">Maximum</label><input class="form-input gs-max" type="number" min="0" step="0.5" value="${esc(max)}" placeholder="10"></div>
+    <button type="button" class="row-btn danger" onclick="this.closest('[data-row-id]').remove();updateGradingBuilderTotal()">Remove</button>
+  </div>`;
+}
+function gradingBuilderCategory(category={name:"",criteria:[]} ){
+  const cid=uid();
+  const criteria=Array.isArray(category.criteria)&&category.criteria.length?category.criteria:[["",""]];
+  const rows=criteria.map(([n,m])=>gradingBuilderRow(n,m)).join("");
+  return `<div class="grading-builder-category" data-category-id="${cid}">
+    <div class="grading-builder-category-head">
+      <div style="flex:1;min-width:220px"><label class="form-label">Subtitle / section name</label><input class="form-input gs-cat-name" value="${esc(category.name||"")}" placeholder="e.g. Unmoderated Caucus, Crisis, Opening Speech"></div>
+      <button type="button" class="row-btn danger" onclick="this.closest('[data-category-id]').remove();updateGradingBuilderTotal()">Remove section</button>
+    </div>
+    <div class="grading-builder-category-items">
+      ${rows}
+    </div>
+    <button type="button" class="secondary" onclick="addGradingCriterionToCategory(this.closest('[data-category-id]'))">+ Add graded item</button>
+  </div>`;
+}
+function addGradingCategory(category={name:"",criteria:[]}){
+  const box=document.getElementById("gradingCategoriesBuilder");
+  if(box)box.insertAdjacentHTML("beforeend",gradingBuilderCategory(category));
+  updateGradingBuilderTotal();
+}
+function addGradingCriterionToCategory(categoryEl){
+  const box=categoryEl?.querySelector(".grading-builder-category-items");
+  if(box)box.insertAdjacentHTML("beforeend",gradingBuilderRow());
+  updateGradingBuilderTotal();
+}
+function updateGradingBuilderTotal(){
+  const total=[...document.querySelectorAll("#gradingCategoriesBuilder .gs-max")].reduce((sum,e)=>sum+(Number(e.value)||0),0);
+  const el=document.getElementById("gradingBuilderTotal");
+  if(el)el.textContent=`Total: ${Number.isInteger(total)?total:total.toFixed(1)}`;
+}
+document.addEventListener("input",e=>{if(e.target?.classList?.contains("gs-max"))updateGradingBuilderTotal()},true);
+function openCustomGradingSystem(id=""){
+  if(!canManageGradingSystems())return alert("You do not have permission to manage grading systems.");
+  const systems=Array.isArray(state.data.gradingSystems)?state.data.gradingSystems:[],existing=systems.find(x=>String(x.id)===String(id))||null;
+  const assigned=new Set(existing?gradingSystemCommitteeIds(existing):[]),rubric=existing?gradingSystemRubric(existing,"en"):[];
+  const categories=rubric.length?rubric:[{name:"",criteria:[["",""]]}];
+  const categoryHtml=categories.map(c=>gradingBuilderCategory(c)).join("");
+  const committeeOptions=state.data.committees.map(c=>`<option value="${c.id}" ${assigned.has(String(c.id))?"selected":""}>${esc(c.name)}</option>`).join("");
+  modal(id?"Edit grading system":"New grading system",`<p class="muted">Build the grading system in sections, like the old HHHSMUN sheets. Each section can be a subtitle such as <strong>Unmoderated Caucus</strong>, <strong>Crisis</strong>, <strong>Opening Speech</strong>, or anything you choose. Add the items graded under that subtitle and give each one a maximum score.</p>
+  ${formField("Title / name","gsName",`value="${esc(existing?gradingSystemName(existing):"")}" placeholder="e.g. CC Grading" autocomplete="off"`)}
+  <label class="form-label">Use for committee(s)</label>
+  <select id="gsCommittees" class="form-input" multiple size="6">${committeeOptions}</select>
+  <p class="muted">Hold Ctrl/Cmd to select multiple committees. A committee can use one custom system at a time.</p>
+  <div class="panel" style="margin-top:16px">
+    <div class="panel-head"><div><h3>Grading sections</h3><p>Sections are the subtitles shown in the grading room. Items inside each section are what the Dais score.</p></div><button type="button" class="secondary" onclick="addGradingCategory()">+ Add section</button></div>
+    <div id="gradingCategoriesBuilder" class="modal-body">${categoryHtml}</div>
+    <div class="settings-actions"><strong id="gradingBuilderTotal">Total: 0</strong></div>
+  </div>
+  <div class="settings-actions"><button type="button" class="secondary" onclick="closeModal()">Cancel</button><button type="button" class="primary" onclick="saveCustomGradingSystem('${esc(id)}')">Save grading system</button></div>`);
+  updateGradingBuilderTotal();
+}
+function saveCustomGradingSystem(id=""){
+  if(!canManageGradingSystems())return alert("You do not have permission to manage grading systems.");
+  const name=document.getElementById("gsName")?.value.trim()||"",committeeIds=[...document.getElementById("gsCommittees")?.selectedOptions||[]].map(o=>String(o.value));
+  if(!name)return alert("Enter a name for the grading system.");
+  const categoryEls=[...document.querySelectorAll("#gradingCategoriesBuilder .grading-builder-category")];
+  if(!categoryEls.length)return alert("Add at least one grading section.");
+  const rubric=categoryEls.map(cat=>{
+    const sectionName=cat.querySelector(".gs-cat-name")?.value.trim()||"";
+    const rows=[...cat.querySelectorAll(".grading-builder-row")].map(row=>({item:row.querySelector(".gs-item")?.value.trim()||"",max:Number(row.querySelector(".gs-max")?.value)}));
+    return {name:sectionName,criteria:rows.map(r=>[r.item,r.max]),max:rows.reduce((sum,r)=>sum+(Number(r.max)||0),0)};
+  });
+  if(rubric.some(c=>!c.name))return alert("Every grading section needs a subtitle / section name.");
+  if(rubric.some(c=>!c.criteria.length||c.criteria.some(([item,max])=>!item||!Number.isFinite(max)||max<=0)))return alert("Every section needs at least one graded item, and every item needs a name and a maximum score greater than 0.");
+  const total=rubricTotal(rubric);
+  if(!total)return alert("The grading system must have at least one point available.");
+  let systems=(Array.isArray(state.data.gradingSystems)?state.data.gradingSystems:[]).map(x=>({...x,committeeIds:gradingSystemCommitteeIds(x)}));
+  const existingIndex=systems.findIndex(x=>String(x.id)===String(id)),existing=existingIndex>=0?systems[existingIndex]:null;
+  systems=systems.map((x,i)=>i===existingIndex?x:{...x,committeeIds:gradingSystemCommitteeIds(x).filter(cid=>!committeeIds.includes(String(cid)))});
+  const obj={id:existing?.id||uid(),name,title:name,committeeIds,rubric,updated:Date.now(),sourceFile:existing?.sourceFile||null};
+  if(existingIndex>=0)systems[existingIndex]=obj;else systems.push(obj);
+  state.data.gradingSystems=systems;save();audit(existingIndex>=0?"Grading system updated":"Grading system created",name,committeeIds[0]||"");closeModal();renderShell();render();
+}
+function deleteCustomGradingSystem(id){
+  if(!canManageGradingSystems())return alert("You do not have permission to manage grading systems.");
+  const system=(state.data.gradingSystems||[]).find(x=>String(x.id)===String(id));if(!system)return;
+  if(!confirm(`Delete grading system "${gradingSystemName(system)}"? Assigned committees will return to the standard rubric.`))return;
+  state.data.gradingSystems=state.data.gradingSystems.filter(x=>String(x.id)!==String(id));save();audit("Grading system deleted",gradingSystemName(system),"");render();
+}
+function gradingSystemsPage(){
+  if(!canManageGradingSystems())return `<div class="panel"><div class="panel-head"><div><h3>Grading Systems</h3><p>You do not have permission to manage custom grading systems.</p></div></div></div>`;
+  const systems=(Array.isArray(state.data.gradingSystems)?state.data.gradingSystems:[]).map(s=>({s,name:gradingSystemName(s),ids:gradingSystemCommitteeIds(s),rubric:gradingSystemRubric(s,"en")}));
+  const cards=systems.map(({s,name,ids,rubric})=>{const total=rubricTotal(rubric),criteria=rubric.reduce((n,c)=>n+(c.criteria?.length||0),0),assigned=ids.map(id=>committee(id)?.name).filter(Boolean);return `<div class="panel"><div class="panel-head"><div><span class="eyebrow">CUSTOM GRADING SYSTEM</span><h3>${esc(name)}</h3><p>${assigned.length?`Used by: ${assigned.map(esc).join(", ")}`:"Not assigned to a committee"}</p></div><div class="settings-actions" style="padding:0"><button class="secondary" onclick="openCustomGradingSystem('${esc(s.id||"")}')">Edit</button><button class="row-btn danger" onclick="deleteCustomGradingSystem('${esc(s.id||"")}')">Delete</button></div></div><div class="metric-grid" style="padding:16px 20px 0;margin-bottom:0">${metric("Total",total,"Maximum points")}${metric("Items",criteria,"Grading criteria")}${metric("Committees",assigned.length,"Assigned")}</div><div class="modal-body"><div class="table-panel"><table><thead><tr><th>Section / subtitle</th><th>Grading item</th><th>Weight</th></tr></thead><tbody>${rubric.flatMap(c=>(c.criteria||[]).map(([n,m])=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(n)}</td><td>/${esc(m)}</td></tr>`)).join("")}</tbody></table></div></div></div>`});
+  return `<div class="permission-banner"><div><strong>Custom grading system manager</strong><p>Create named grading systems, define the items being graded and their maximum scores, then assign each system to one or more committees.</p></div><span>SG · LOGISTICS · TRAINING · ADVISORY</span></div><div class="toolbar"><button class="primary" onclick="openCustomGradingSystem()">+ New grading system</button></div>${cards||empty("No custom grading systems","Create your first system, for example CC Grading or Normal Grading.")}`;
+}
 
 let pendingRubricImport=null;
 function openRubricImport(){
@@ -1530,7 +1648,7 @@ function confirmRubricImport(){
   const cid=document.getElementById("importRubricCommittee")?.value;if(!cid||!pendingRubricImport)return alert("Select a committee and upload an Excel file first.");
   state.data.gradingSystems=Array.isArray(state.data.gradingSystems)?state.data.gradingSystems:[];
   const rubric=normalizeRubric(pendingRubricImport.rubric),i=state.data.gradingSystems.findIndex(x=>x.committee===cid);
-  const existing=i>=0?state.data.gradingSystems[i]:null;const rubricByLanguage=(existing?.rubric&&typeof existing.rubric==="object"&&!Array.isArray(existing.rubric))?{...existing.rubric}:{en:Array.isArray(existing?.rubric)?existing.rubric:undefined};rubricByLanguage[hhhLanguage]=rubric;const obj={id:i>=0?existing.id:uid(),committee:cid,language:hhhLanguage,rubric:rubricByLanguage,sourceFile:pendingRubricImport.fileName,updated:Date.now()};
+  const existing=i>=0?state.data.gradingSystems[i]:null;const rubricByLanguage=(existing?.rubric&&typeof existing.rubric==="object"&&!Array.isArray(existing.rubric))?{...existing.rubric}:{en:Array.isArray(existing?.rubric)?existing.rubric:undefined};rubricByLanguage[hhhLanguage]=rubric;const importedName=String(existing?.name||existing?.title||pendingRubricImport.fileName).replace(/\.(xlsx|xls)$/i,"");const obj={id:i>=0?existing.id:uid(),name:importedName,title:importedName,committee:cid,committeeIds:[String(cid)],language:hhhLanguage,rubric:rubricByLanguage,sourceFile:pendingRubricImport.fileName,updated:Date.now()};
   if(i>=0)state.data.gradingSystems[i]=obj;else state.data.gradingSystems.push(obj);
   audit("Grading system imported",pendingRubricImport.fileName,cid);save();pendingRubricImport=null;closeModal();alert("Grading system imported successfully. This committee will now use its own rubric.");go("grading");
 }
@@ -1701,6 +1819,7 @@ function screenDraftEvent(e){const t=e.target;if(state.page!=="screen"||!t||!t.i
 .screen-queue-head>div:first-child{display:flex;flex-direction:column;gap:4px}.screen-queue-head span{font-size:13px;color:#64748b}.screen-queue-actions{display:flex;gap:8px;flex-wrap:wrap}.screen-queue-panel textarea{min-height:120px}
 .notification-list{display:grid;gap:10px}.notification-card{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border:1px solid #d9e0e7;border-radius:12px;padding:14px;background:#fff}.notification-card.unread{border-left:4px solid #111827;background:#f8fafc}.notification-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.notification-meta small{color:#64748b}.notification-card p{white-space:pre-wrap;margin:8px 0 0;line-height:1.5}.notification-banner{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:14px;border:1px solid #cbd5e1}.nav-badge{display:inline-flex;min-width:18px;height:18px;align-items:center;justify-content:center;border-radius:999px;background:#b91c1c;color:#fff;font-size:11px;padding:0 5px;margin-left:5px}
 
+.grading-builder-category{border:1px solid #dfe3e7;border-radius:10px;padding:15px;margin-bottom:14px;background:#fafbfb}.grading-builder-category-head{display:flex;gap:12px;align-items:flex-end;margin-bottom:13px}.grading-builder-category-items{padding-top:2px}.grading-builder-category>.secondary{margin-top:2px}@media(max-width:700px){.grading-builder-category-head{flex-direction:column;align-items:stretch}}
 /* Self-contained projector safeguards: never depend on an external stylesheet. */
 html body #screenOnly.screen-only{min-height:100vh!important;width:100vw!important;box-sizing:border-box!important;background:#08111a!important;color:#f5f7fa!important;margin:0!important;padding:clamp(28px,4vw,64px)!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}
 html body #screenOnly .screen-brand{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:32px!important;border-bottom:1px solid rgba(255,255,255,.14)!important;padding-bottom:24px!important;margin-bottom:42px!important}
