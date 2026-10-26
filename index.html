@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>HHHSMUN Conference Management</title>
   <style id="embeddedBaseStyles">
+.refresh-notice{background:#fff4e5;color:#8a5200;border:1px solid #f0c98a;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}.refresh-notice:hover{background:#ffe9c7}
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
 :root{--ink:#111820;--muted:#68727c;--line:#dfe3e7;--paper:#f6f7f8;--white:#fff;--blue:#1688d4;--blue-dark:#086aa9;--red:#9d3434;--green:#2e7654;--amber:#9b6b19;--sidebar:#10171e}
 *{box-sizing:border-box}body{margin:0;font-family:"DM Sans",Arial,sans-serif;color:var(--ink);background:var(--paper);font-size:14px}button,input,select{font:inherit}.hidden{display:none!important}
@@ -95,7 +96,7 @@
       </div>
     </aside>
     <main class="main">
-      <header class="topbar"><div><div class="breadcrumb">HHHSMUN / <span id="pageName">Overview</span></div><h2 id="pageTitle">Conference overview</h2></div><div class="user-menu"><div class="language-wrap app-language-visible"><span id="appLanguageLabel">Language / Langue / اللغة</span><select id="languageSelect" onchange="setHHHLang(this.value)" aria-label="Language"><option value="en">English</option><option value="fr">Français</option><option value="ar">العربية</option></select></div><span id="remoteStatus" class="remote-status">Connecting shared storage…</span><span class="avatar" id="avatar"></span><span id="userName"></span></div></header>
+      <header class="topbar"><div><div class="breadcrumb">HHHSMUN / <span id="pageName">Overview</span></div><h2 id="pageTitle">Conference overview</h2></div><div class="user-menu"><div class="language-wrap app-language-visible"><span id="appLanguageLabel">Language / Langue / اللغة</span><select id="languageSelect" onchange="setHHHLang(this.value)" aria-label="Language"><option value="en">English</option><option value="fr">Français</option><option value="ar">العربية</option></select></div><button id="refreshNotice" class="refresh-notice hidden" onclick="refreshNow()">⟳ New updates — Refresh</button><span id="remoteStatus" class="remote-status">Connecting shared storage…</span><span class="avatar" id="avatar"></span><span id="userName"></span></div></header>
       <section id="content" class="content"></section>
     </main>
   </div>
@@ -204,6 +205,7 @@ async function publishScreenStateNow(id){
     localDirty=false;
     saveLocalOnly();
     broadcastScreenState(id,state.data.screenStates?.[id]||getScreenState(id));
+    pendingRemote=false;hideRefreshNotice();
     return true;
   }catch(e){console.warn("Screen publish failed",e);return false;}
 }
@@ -333,40 +335,49 @@ function isUiEditing(){
   const active=document.activeElement;
   return !!document.getElementById("modal") || !!active && ["INPUT","TEXTAREA","SELECT"].includes(active.tagName);
 }
+// Changes made by other people are NOT applied automatically (that wiped what people were typing).
+// Instead a "New updates — Refresh" button appears; updates are applied when it is pressed or when you change page.
+let pendingRemote=false;
+function showRefreshNotice(){const b=document.getElementById("refreshNotice");if(b)b.classList.remove("hidden");}
+function hideRefreshNotice(){const b=document.getElementById("refreshNotice");if(b)b.classList.add("hidden");}
+function holdIncoming(incoming){
+  if(!incoming||!state.role)return;
+  if(sameJSON(incoming,lastRemoteSnapshot)||sameJSON(incoming,state.data))return;
+  pendingRemote=true;showRefreshNotice();
+}
+async function applyPendingRemote(){
+  if(state.page==="screen"&&document.getElementById("screenCountry"))saveScreenDraftFromForm();
+  if(localDirty){clearTimeout(remoteSaveTimer);await pushRemoteState();}
+  else{
+    try{
+      const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
+      if(!error&&data?.data){
+        const merged=mergeConferenceState(lastRemoteSnapshot||data.data,state.data,data.data);
+        state.data={...structuredClone(defaults),...merged};
+        lastRemoteSnapshot=cloneData(data.data);
+      }
+    }catch(e){console.warn("Refresh failed",e)}
+  }
+  state.data.committees=ensureUniqueCommitteePasswords(state.data.committees||[]);
+  state.data.financeEntries=normalizeFinanceEntries(state.data.financeEntries);
+  state.data.screenStates=normalizeScreenStates(state.data.screenStates);
+  saveLocalOnly();
+  pendingRemote=false;hideRefreshNotice();
+}
+function refreshNow(){applyPendingRemote().then(()=>{if(state.role){renderShell();render();}});}
 function startRemoteSync(){
   try{
     supabaseClient.channel("hhhsmUN-conference-state")
-      .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{
-        const incoming=payload?.new?.data;
-        if(!incoming || localDirty || isGradingLocked() || isUiEditing())return;
-        state.data={...structuredClone(defaults),...incoming};
-        state.data.committees=ensureUniqueCommitteePasswords(state.data.committees||[]);
-        state.data.screenStates=normalizeScreenStates(state.data.screenStates);
-        lastRemoteSnapshot=cloneData(state.data);
-        saveLocalOnly();
-        // Background realtime updates must not re-render the Chairing Screen.
-        // The explicit Update button controls publication to the connected screen.
-        if(state.role && state.page!=="screen") render();
-      }).subscribe();
+      .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{holdIncoming(payload?.new?.data);})
+      .subscribe();
   }catch(e){console.warn("Realtime subscription unavailable; polling will be used.",e)}
   setInterval(async()=>{
-    if(!remoteReady || localDirty || isGradingLocked() || isUiEditing())return;
+    if(!remoteReady||localDirty||!state.role)return;
     try{
-      const {data,error}=await supabaseClient.from("conference_state").select("data,updated_at").eq("id","main").maybeSingle();
-      if(error||!data?.data)return;
-      if(!sameJSON(data.data,lastRemoteSnapshot)){
-        // Do not replace the Chairing Screen form from background polling.
-        // Its text/select changes are published only by "Update connected screen".
-        if(state.page==="screen") return;
-        state.data={...structuredClone(defaults),...data.data};
-        state.data.committees=ensureUniqueCommitteePasswords(state.data.committees||[]);
-        state.data.screenStates=normalizeScreenStates(state.data.screenStates);
-        lastRemoteSnapshot=cloneData(state.data);
-        saveLocalOnly();
-        if(state.role) render();
-      }
+      const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
+      if(!error&&data?.data)holdIncoming(data.data);
     }catch(e){console.warn("Remote sync poll failed",e)}
-  },5000);
+  },15000);
 }
 const STORAGE_KEY="hhhsmUN_official_v2";
 const defaults={
@@ -385,10 +396,11 @@ const loginPasswords={
   chair:"Orbit#Cedar39",
   delegate:"Lunar!Maple62"
 };
+const ALL_PAGES=[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["finance","Finance"],["training","Training"],["rapporteur","Rapporteurs"],["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["audit","Activity Log"],["settings","Settings"]];
 window.roles={
   president:{label:"President",name:"President",avatar:"P",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
   deputy:{label:"Deputy President",name:"Deputy President",avatar:"DP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
-  sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
+  sg:{label:"Secretary-General",name:"Secretary-General",avatar:"SG",pages:ALL_PAGES},
   logistics:{label:"Head of Logistics",name:"Head of Logistics",avatar:"HL",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"],["settings","Settings"]]},
   finance:{label:"Head of Finance",name:"Head of Finance",avatar:"HF",pages:[["overview","Overview"],["finance","Finance"]]},
   // Head of Training
@@ -443,29 +455,33 @@ window.roles={
       ["notifications","Notifications"]
     ]
   },
-  advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["gradingSystems","Grading Systems"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Conference Timeline"],["audit","Activity Log"]]},
+  advisory:{label:"Advisory Panel",name:"Advisory Panel",avatar:"AP",pages:ALL_PAGES},
   chair:{label:"Chair",name:"Chair",avatar:"C",pages:[["overview","Overview"],["committees","Committees"],["countries","Countries"],["staff","Staff & Dais"],["delegates","Delegates"],["resolutions","Resolution Papers"],["grading","Grading"],["screen","Chairing Screen"],["resources","Resources"],["logisticsRequests","Logistics Requests"],["notifications","Notifications"],["tasks","Tasks"],["timeline","Committee Timeline"]]},
   delegate:{label:"Delegate",name:"Delegate",avatar:"D",pages:[["delegatePortal","Delegate Portal"],["myResolutions","My Resolution Papers"],["resources","Resources"]]}
 };
-const passWords=["Cedar","Orbit","Maple","Harbor","Quartz","Atlas","Lantern","Signal","Raven","Vector","Summit","Comet","Pine","Marble","Copper","Lunar"];
-function generateCommitteePassword(existing=[]){
-  const used=new Set((existing||[]).map(c=>String(c?.gradingPassword||"")));
-  let password="",attempts=0;
-  do{
-    const a=passWords[Math.floor(Math.random()*passWords.length)],b=passWords[Math.floor(Math.random()*passWords.length)],n=Math.floor(10+Math.random()*90);
-    password=`${a}!${b}${n}`;
-    attempts++;
-  }while(used.has(password)&&attempts<100);
-  return password;
-}
+// Committee passwords: English names become NAME_123; Arabic names become arabic1-123, arabic2-123, ...
+function isArabicText(s){return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(String(s||""));}
 function ensureUniqueCommitteePasswords(committees){
+  const list=(committees||[]).map(c=>({...c}));
   const used=new Set();
-  return (committees||[]).map(c=>{
-    const out={...c};
-    if(!out.gradingPassword || used.has(String(out.gradingPassword))) out.gradingPassword=generateCommitteePassword([...committees,...Array.from(used).map(gradingPassword=>({gradingPassword}))]);
-    used.add(String(out.gradingPassword));
-    return out;
+  // Arabic committees keep their existing arabicN-123 number so numbers never shift
+  list.forEach(c=>{
+    const p=String(c.gradingPassword||"");
+    if(isArabicText(c.name)&&/^arabic\d+-123$/.test(p)&&!used.has(p)) used.add(p);
+    else c.gradingPassword="";
   });
+  let n=1;
+  list.forEach(c=>{
+    if(c.gradingPassword) return;
+    if(isArabicText(c.name)){
+      while(used.has(`arabic${n}-123`)) n++;
+      c.gradingPassword=`arabic${n}-123`;
+      used.add(c.gradingPassword);
+    }else{
+      c.gradingPassword=`${String(c.name||"").replace(/\s+/g,"")}_123`;
+    }
+  });
+  return list;
 }
 function normalizeFinanceEntries(value){
   if(Array.isArray(value))return value;
@@ -595,10 +611,8 @@ function go(p){
   const allowed=window.roles[state.role]?.pages?.some(x=>x[0]===p);
   if(!allowed){console.warn("Blocked unauthorized page access:",p);return;}
   if(!Object.prototype.hasOwnProperty.call(pages,p)){console.error("Unknown page:",p);return;}
-  state.page=p;
-  saveSession();
-  renderShell();
-  render();
+  const finish=()=>{state.page=p;saveSession();renderShell();render();};
+  if(pendingRemote)applyPendingRemote().then(finish);else finish();
 }
 function notificationRecipientMatches(n){
   if(!n || n.type!=="leadership") return false;
@@ -659,6 +673,7 @@ function committee(id){return state.data.committees.find(c=>c.id===id);}
 function isStaff(){return ["president","deputy","sg","logistics","finance","training","rapporteur","globalvillage","advisory","chair"].includes(state.role);}
 function canManage(){return ["president","deputy","sg","logistics","advisory","chair"].includes(state.role);}
 function canManageGradingSystems(){return ["sg","logistics","training","advisory"].includes(state.role);}
+function hasFullAccess(){return ["sg","advisory"].includes(state.role);}
 function gradingSystemCommitteeIds(system){
   if(!system||typeof system!=="object")return [];
   const ids=Array.isArray(system.committeeIds)?system.committeeIds.map(String):[];
@@ -702,14 +717,13 @@ function countryRankings(){
 }
 let countryRankingPanelOpen=false;
 let countryRankingTop15=false;
-function countryRankingsAllowed(){return ["president","chair"].includes(state.role);}
+function countryRankingsAllowed(){return ["president","chair","sg","advisory"].includes(state.role);}
 function toggleCountryRankingPanel(){countryRankingPanelOpen=!countryRankingPanelOpen;countryRankingTop15=false;render();}
 function toggleCountryRankingTop15(){countryRankingTop15=!countryRankingTop15;const extras=document.querySelectorAll(".rank-extra");const btn=document.getElementById("rankingTopToggle");extras.forEach(x=>x.classList.toggle("hidden",!countryRankingTop15));if(btn)btn.textContent=countryRankingTop15?(hhhLanguage==="fr"?"Afficher les 5 premiers":hhhLanguage==="ar"?"عرض أفضل 5":"Show top 5"):(hhhLanguage==="fr"?"Afficher le top 15":hhhLanguage==="ar"?"عرض أفضل 15":"View top 15");}
 
 const pages={
  overview:()=>{
   if(isCommitteeDaisRole()) return committeeOverviewPage();
-  if(["sg","logistics","advisory"].includes(state.role)) return conferenceDashboardPage();
   const showRankings=(state.page==="overview"&&countryRankingsAllowed()&&!new URLSearchParams(location.search).has("screen"));
   const rankings=showRankings?countryRankings():[];
   const rankTitle=hhhLanguage==="fr"?"Classement des pays":hhhLanguage==="ar"?"ترتيب الدول":"Country rankings";
@@ -721,13 +735,14 @@ const pages={
   const scoreLabel=hhhLanguage==="fr"?"Note moyenne":hhhLanguage==="ar"?"متوسط العلامة":"Average score";
   const noRanks=hhhLanguage==="fr"?"Aucune note enregistrée pour le moment.":hhhLanguage==="ar"?"لم يتم تسجيل أي علامات بعد.":"No grades have been recorded yet.";
   const rankingPanel=showRankings?`<div class="panel country-ranking-panel"><div class="panel-head"><div><h3>${rankTitle}</h3><p>${rankDesc} ${rankings.length?"":""}</p></div><button class="secondary" onclick="toggleCountryRankingPanel()">${countryRankingPanelOpen?collapseLabel:expandLabel}</button></div>${countryRankingPanelOpen?`<div class="country-ranking-body">${rankings.length?`<div class="country-ranking-list">${rankings.map((r,i)=>`<div class="country-rank ${i>=5&&!countryRankingTop15?'rank-extra hidden':''}"><div class="country-rank-position">${i+1}</div><div class="country-rank-name"><strong>${esc(r.name)}</strong><small>${r.count} ${r.count===1?(hhhLanguage==="fr"?"évaluation":hhhLanguage==="ar"?"تقييم":"grade"):(hhhLanguage==="fr"?"évaluations":hhhLanguage==="ar"?"تقييمات":"grades")}</small></div><strong class="country-rank-score">${r.score.toFixed(1)}/100</strong></div>`).join("")}</div>${rankings.length>5?`<button class="secondary full ranking-toggle" id="rankingTopToggle" onclick="toggleCountryRankingTop15()">${countryRankingTop15?hide15:view15}</button>`:""}`:empty(hhhLanguage==="fr"?"Aucun classement":hhhLanguage==="ar"?"لا يوجد ترتيب":"No rankings",noRanks)}</div>`:""}</div>`:"";
+  if(["sg","logistics","advisory"].includes(state.role)) return conferenceDashboardPage()+rankingPanel;
   return `<div class="permission-banner"><div><strong>${state.role==="advisory"?"Advisory Panel — full conference access":"Conference management"}</strong><p>${state.role==="advisory"?"The Advisory Panel can access conference-wide committees, countries, staff, delegates, resolutions, grading, screens, resources, finance, training, rapporteurs and logistics.":"Use the navigation to manage your assigned conference functions."}</p></div><span>${state.role==="advisory"?"FULL ACCESS":"HHHSMUN"}</span></div><div class="metric-grid">${metric("Committees",state.data.committees.length,"Configured by your team")}${metric("Countries",state.data.countries.length,"Registered")}${metric("Delegates",state.data.delegates.length,"Registered")}${metric("Resolution papers",state.data.resolutions.length,"Submitted")}</div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Conference structure</h3><p>Every committee is created and controlled here.</p></div><button class="text-btn" onclick="go('committees')">Manage →</button></div>${state.data.committees.length?`<div class="committee-list">${state.data.committees.map(c=>`<div class="committee-row"><div><strong>${esc(c.name)}</strong><small>${esc(c.fullName||"")}${c.room?" · "+esc(c.room):""}</small></div><span>${state.data.delegates.filter(d=>d.committee===c.id).length}</span><span class="status in-session">Configured</span></div>`).join("")}</div>`:empty("No committees yet","Create your committees from the Committees tab.")}</div><div class="panel"><div class="panel-head"><div><h3>Logistics requests</h3><p>Submit materials needed by any committee and send the request directly to Head of Logistics.</p></div><button class="primary" onclick="go('logisticsRequests')">Open logistics →</button></div></div>${rankingPanel}</div>`;
  },
  committees:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'committeeTable')" placeholder="Search committees..."></div>${canManage()?`<button class="primary" onclick="openCommittee()">+ Add committee</button>`:""}</div><div class="panel setup-note"><strong>Unlimited custom committees</strong><p>Create any committee you want. Each committee automatically gets its own President, Deputy President and Chair assignment area, a grading password, a resolution queue and a chairing screen.</p></div><div class="panel table-panel"><table id="committeeTable"><thead><tr><th>Committee</th><th>Full name</th><th>Room</th><th>Type</th><th>Dais</th><th>Delegates</th><th>Grading</th><th></th></tr></thead><tbody>${visibleCommittees().map(c=>{const dais=state.data.staff.filter(s=>s.committee===c.id);const delegateCount=state.data.delegates.filter(d=>d.committee===c.id).length;return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.fullName||"")}</td><td>${esc(c.room||"—")}</td><td>${esc(c.type||"—")}</td><td>${dais.filter(s=>["President","Deputy President","Chair"].includes(s.role)).length}/3</td><td>${delegateCount}</td><td><span class="access mono">${esc(c.gradingPassword||"Not assigned")}</span></td><td><button class="row-btn" onclick="openCommitteePanel('${c.id}')">Open panel</button> ${canManage()?`<button class="row-btn" onclick="openCommittee('${c.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('committees','${c.id}')">Delete</button>`:""}</td></tr>`}).join("")}</tbody></table>${!visibleCommittees().length?empty("No committees","Use “Add committee” to create the conference structure."):""}</div>`,
  countries:()=>countriesPanel(),
  staff:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'staffTable')" placeholder="Search staff..."></div>${canManage()?`<button class="primary" onclick="openStaff()">+ Add staff member</button>`:""}</div><div class="panel table-panel"><table id="staffTable"><thead><tr><th>Name</th><th>Role</th><th>Committee</th><th>Delegates</th><th></th></tr></thead><tbody>${(isCommitteeDaisRole()?state.data.staff.filter(x=>x.committee===currentUserCommitteeId()):state.data.staff).map(s=>{const delegateCount=s.committee?state.data.delegates.filter(d=>d.committee===s.committee).length:null;return `<tr><td><strong>${esc(s.name)}</strong></td><td><span class="role-badge">${esc(s.role)}</span></td><td>${esc(committee(s.committee)?.name||"Conference-wide")}</td><td>${delegateCount===null?"—":delegateCount}</td><td>${canManage()?`<button class="row-btn" onclick="openStaff('${s.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('staff','${s.id}')">Delete</button>`:""}</td></tr>`}).join("")}</tbody></table>${!state.data.staff.length?empty("No staff added","Add the President, Deputy President, Chairs and conference heads."):""}</div><div class="settings-grid"><div class="setting"><label>Conference leadership</label><strong>President · Deputy President</strong><p>Conference-wide leadership roles retained from the original system.</p></div><div class="setting"><label>Operational heads</label><strong>Logistics · Finance · Training · Rapporteurs</strong><p>Separate management areas are available for each department.</p></div></div>`,
  delegates:()=>`<div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'delegateTable')" placeholder="Search delegates..."></div>${canManage()?`<button class="primary" onclick="openDelegate()">+ Add delegate</button>`:""}</div><div class="panel table-panel"><table id="delegateTable"><thead><tr><th>Name</th><th>Country</th><th>Committee</th><th></th></tr></thead><tbody>${scopedItems(state.data.delegates).map(d=>`<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</td><td>${esc(committee(d.committee)?.name||"")}</td><td>${canManage()?`<button class="row-btn" onclick="openDelegate('${d.id}')">Edit</button> <button class="row-btn danger" onclick="removeRecord('delegates','${d.id}')">Delete</button>`:""}</td></tr>`).join("")}</tbody></table>${!state.data.delegates.length?empty("No delegates","Add delegates after creating committees and countries."):""}</div>`,
- resolutions:()=>{const incoming=scopedItems(state.data.resolutions).filter(r=>r.status!=="Archived");return `<div class="permission-banner"><div><strong>Resolution paper workflow</strong><p>Delegates submit papers with one or more main submitters and co-submitters. The paper becomes visible to the Secretary-General and the assigned chairing panel for review.</p></div><span>DELEGATE → SG → CHAIRING PANEL</span></div><div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'resolutionTable')" placeholder="Search papers, committees or submitters..."></div></div><div class="panel table-panel"><table id="resolutionTable"><thead><tr><th>Paper</th><th>Committee</th><th>Main submitters</th><th>Co-submitters</th><th>Status</th><th>Actions</th></tr></thead><tbody>${incoming.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${r.fileName?`<button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button>`:esc(r.clauses||"")}</small></td><td>${esc(committee(r.committee)?.name||"")}</td><td>${(r.main||[]).map(esc).join(", ")||"—"}</td><td>${(r.co||[]).map(esc).join(", ")||"—"}</td><td><span class="status ${r.status.toLowerCase().replaceAll(" ","-")}">${esc(r.status)}</span></td><td>${["president","deputy","sg","rapporteur","chair"].includes(state.role)?`<button class="row-btn" onclick="openResolution('${r.id}')">Review</button>`:""}</td></tr>`).join("")}</tbody></table>${!incoming.length?empty("No resolution papers","Submitted papers will appear here."):""}</div>`},
+ resolutions:()=>{const incoming=scopedItems(state.data.resolutions).filter(r=>r.status!=="Archived");return `<div class="permission-banner"><div><strong>Resolution paper workflow</strong><p>Delegates submit papers with one or more main submitters and co-submitters. The paper becomes visible to the Secretary-General and the assigned chairing panel for review.</p></div><span>DELEGATE → SG → CHAIRING PANEL</span></div><div class="toolbar"><div class="search">⌕ <input oninput="filterRows(this.value,'resolutionTable')" placeholder="Search papers, committees or submitters..."></div></div><div class="panel table-panel"><table id="resolutionTable"><thead><tr><th>Paper</th><th>Committee</th><th>Main submitters</th><th>Co-submitters</th><th>Status</th><th>Actions</th></tr></thead><tbody>${incoming.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${r.fileName?`<button class="text-btn" onclick="downloadResolutionFile('${r.id}')">${esc(r.fileName)}</button>`:esc(r.clauses||"")}</small></td><td>${esc(committee(r.committee)?.name||"")}</td><td>${(r.main||[]).map(esc).join(", ")||"—"}</td><td>${(r.co||[]).map(esc).join(", ")||"—"}</td><td><span class="status ${r.status.toLowerCase().replaceAll(" ","-")}">${esc(r.status)}</span></td><td>${["president","deputy","sg","rapporteur","chair","advisory"].includes(state.role)?`<button class="row-btn" onclick="openResolution('${r.id}')">Review</button>`:""}</td></tr>`).join("")}</tbody></table>${!incoming.length?empty("No resolution papers","Submitted papers will appear here."):""}</div>`},
  grading:()=>`<div class="grading-summary"><div><span class="eyebrow">COMMITTEE-GATED GRADING</span><h3>Enter a committee grading room</h3><p>Use the private grading password provided to your committee.</p></div>${canManage()?`<button class="secondary" onclick="openRubricImport()">Import Excel grading system</button>`:""}</div>${state.gradingCommittee?gradingRoom():`<div class="panel"><div class="modal-body">${selectField("Committee","gradeCom",`<option value="">Select committee</option>`+state.data.committees.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join(""))}${formField("Committee grading password","gradePass",`type="password" placeholder="Enter private password" autocomplete="off"`)}<button class="primary full" onclick="enterGrading()">Enter grading system</button></div></div>`}`,
  gradingSystems:()=>gradingSystemsPage(),
  screen:()=>screenPage(),
@@ -742,8 +757,8 @@ const pages={
 logisticsRequests:()=>{
   const all=state.data.logisticsRequests||[];
   const isGV=state.role==="globalvillage";
-  const canSubmit=["president","chair","globalvillage"].includes(state.role);
-  const canManage=state.role==="logistics";
+  const canSubmit=["president","chair","globalvillage","sg","advisory"].includes(state.role);
+  const canManage=state.role==="logistics"||hasFullAccess();
   const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
   let visible=all;
   if(isCommitteeDaisRole())visible=all.filter(r=>r.committee===currentUserCommitteeId());
@@ -774,7 +789,7 @@ settings:()=>`<div class="panel"><div class="panel-head"><div><h3>Saved data</h3
 };
 
 function openCommittee(id=""){const x=committee(id)||{};modal(id?"Edit committee":"Add committee",`${formField("Committee abbreviation","fName",`value="${esc(x.name||"")}" placeholder="UNODC"`)}${formField("Official committee name","fFull",`value="${esc(x.fullName||"")}"`)}${formField("Room (optional)","fRoom",`value="${esc(x.room||"")}"`)}${formField("Committee type (optional)","fType",`value="${esc(x.type||"")}" placeholder="General Assembly, Crisis, Specialized..."`)}<label class="form-label">Description (optional)</label><textarea id="fDescription" class="form-input" rows="3" placeholder="Brief description">${esc(x.description||"")}</textarea><button class="primary full" onclick="saveCommittee('${id}')">Save committee</button>`)}
-function saveCommittee(id){const name=document.getElementById("fName").value.trim(),fullName=document.getElementById("fFull").value.trim(),room=document.getElementById("fRoom").value.trim(),type=document.getElementById("fType").value.trim(),description=document.getElementById("fDescription").value.trim();if(!name)return alert("Committee abbreviation is required.");const duplicate=state.data.committees.find(c=>c.name.toLowerCase()===name.toLowerCase()&&c.id!==id);if(duplicate)return alert("A committee with that abbreviation already exists.");const obj={id:id||uid(),name,fullName,room,type,description,gradingPassword:id?(committee(id)?.gradingPassword||generateCommitteePassword()):generateCommitteePassword()};const i=state.data.committees.findIndex(c=>c.id===id);i>=0?state.data.committees[i]=obj:state.data.committees.push(obj);initializeConferenceFeatures();save();closeModal();render()}
+function saveCommittee(id){const name=document.getElementById("fName").value.trim(),fullName=document.getElementById("fFull").value.trim(),room=document.getElementById("fRoom").value.trim(),type=document.getElementById("fType").value.trim(),description=document.getElementById("fDescription").value.trim();if(!name)return alert("Committee abbreviation is required.");const duplicate=state.data.committees.find(c=>c.name.toLowerCase()===name.toLowerCase()&&c.id!==id);if(duplicate)return alert("A committee with that abbreviation already exists.");const obj={id:id||uid(),name,fullName,room,type,description,gradingPassword:id?(committee(id)?.gradingPassword||""):""};const i=state.data.committees.findIndex(c=>c.id===id);i>=0?state.data.committees[i]=obj:state.data.committees.push(obj);state.data.committees=ensureUniqueCommitteePasswords(state.data.committees);initializeConferenceFeatures();save();closeModal();render()}
 function openCountry(id=""){const x=state.data.countries.find(x=>x.id===id)||{committees:[]};modal(id?"Edit country":"Add country",`${formField("Country name","fCountry",`value="${esc(x.name||"")}"`)}<label class="form-label">Committees where this country is available</label><div class="check-grid">${state.data.committees.length?state.data.committees.map(c=>`<label><input type="checkbox" name="fCom" value="${c.id}" ${(x.committees||[]).includes(c.id)?"checked":""}> ${esc(c.name)}</label>`).join(""):"<span class='muted'>Create committees first.</span>"}</div><button class="primary full" onclick="saveCountry('${id}')">Save country</button>`)}
 function saveCountry(id){const name=document.getElementById("fCountry").value.trim();if(!name)return alert("Country name is required.");const committees=[...document.querySelectorAll('input[name="fCom"]:checked')].map(x=>x.value),obj={id:id||uid(),name,committees};const i=state.data.countries.findIndex(x=>x.id===id);i>=0?state.data.countries[i]=obj:state.data.countries.push(obj);save();closeModal();render()}
 function openStaff(id=""){const x=state.data.staff.find(x=>x.id===id)||{};const rolesList=["President","Deputy President","Secretary-General","Head of Logistics","Head of Finance","Head of Training","Head of Rapporteurs","Head of Global Village","Chair"];modal(id?"Edit staff member":"Add staff member",`${formField("Full name","fStaff",`value="${esc(x.name||"")}"`)}${selectField("Role","fRole",rolesList.map(r=>`<option ${x.role===r?"selected":""}>${r}</option>`).join(""))}${selectField("Committee","fStaffCom",`<option value="">Conference-wide</option>`+state.data.committees.map(c=>`<option value="${c.id}" ${x.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join(""))}<button class="primary full" onclick="saveStaff('${id}')">Save staff member</button>`)}
@@ -820,7 +835,7 @@ ${assignedCountries.map(country=>{const d=ds.find(d=>d.country===country.id);con
 </select></div>
 <div><button class="row-btn danger" onclick="removeCountryFromCommittee('${country.id}','${id}')">Remove</button></div>
 </div>`}).join("")||'<div class="empty-state"><strong>No countries assigned yet.</strong><p>Add countries above, then choose Present or Present and Voting for each country.</p></div>'}
-</div></div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>Set each country's status above. Changes save automatically.</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Late","Absent"].map(a=>{const n=assignedCountries.filter(c=>((c.attendance||{})[id]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Private grading password for this committee</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="primary" onclick="goToGrading('${id}')">Open grading</button><button class="secondary" onclick="setScreenCommittee('${id}')">Use on chairing screen</button><button class="secondary" onclick="rotateCommitteePassword('${id}')">Generate new password</button></div></div>`}
+</div></div></div><div class="panel"><div class="panel-head"><div><h3>Attendance summary</h3><p>Set each country's status above. Changes save automatically.</p></div></div><div class="attendance-summary">${["Present","Present and Voting","Late","Absent"].map(a=>{const n=assignedCountries.filter(c=>((c.attendance||{})[id]||"")===a).length;return `<div class="attendance-pill"><strong>${n}</strong><span>${a}</span></div>`}).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Private grading password for this committee</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="primary" onclick="goToGrading('${id}')">Open grading</button><button class="secondary" onclick="setScreenCommittee('${id}')">Use on chairing screen</button></div></div>`}
 function openDaisAssignment(committeeId,role){const current=state.data.staff.find(s=>s.committee===committeeId&&s.role===role);const names=state.data.staff.filter(s=>s.role===role&&(s.committee===committeeId||!s.committee));modal(`Assign ${role}`,`${formField("Full name","daisName",`value="${esc(current?.name||"")}" placeholder="Full name"`)}<p class="muted">This assignment only grants this Dais role access to the selected committee.</p><button class="primary full" onclick="saveDaisAssignment('${committeeId}','${role}','${current?.id||""}')">Save assignment</button>`) }
 function saveDaisAssignment(committeeId,role,id){audit("Dais assignment updated",`${role}: ${document.getElementById("daisName")?.value||""}`,committeeId);const name=document.getElementById("daisName").value.trim();if(!name)return alert("Name is required.");let existing=state.data.staff.find(s=>s.id===id)||state.data.staff.find(s=>s.committee===committeeId&&s.role===role);if(existing){existing.name=name;existing.committee=committeeId;existing.committeeId=committeeId;existing.role=role}else state.data.staff.push({id:uid(),name,role,committee:committeeId,committeeId:committeeId});save();closeModal();openCommitteePanel(committeeId)}
 function saveBulkCountries(committeeId){const lines=document.getElementById("bulkCountries").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return alert("Enter at least one country.");for(const line of lines){const parts=line.split("/").map(x=>x.trim());const countryName=parts[0],delegateName=parts[1]||"";if(!countryName)continue;let country=state.data.countries.find(c=>c.name.toLowerCase()===countryName.toLowerCase());if(!country){country={id:uid(),name:countryName,committees:[]};state.data.countries.push(country)}country.committees=country.committees||[];if(!country.committees.includes(committeeId))country.committees.push(committeeId);if(delegateName){let d=state.data.delegates.find(x=>x.committee===committeeId&&x.country===country.id);if(d)d.name=delegateName;else state.data.delegates.push({id:uid(),name:delegateName,committee:committeeId,country:country.id})}}save();closeModal();openCommitteePanel(committeeId)}
@@ -829,11 +844,11 @@ function removeCountryFromCommittee(countryId,committeeId){const c=state.data.co
 function openLogisticsRequest(){
  const mine=state.data.staff.find(s=>s.role==="Chair"&&s.name===window.roles.chair.name);
  let committeeId=currentUserCommitteeId();
- const isPresident=state.role==="president"&&!committeeId;
+ const isPresident=(state.role==="president"||hasFullAccess())&&!committeeId;
  const isGlobalVillage=state.role==="globalvillage";
  if(isPresident && !committeeId) committeeId="";
  if(["chair","president"].includes(state.role) && !committeeId && state.role!=="president")return alert("Your Chair account is not assigned to a committee.");
- if(!["chair","president","globalvillage"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
+ if(!["chair","president","globalvillage","sg","advisory"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
  const items=[
   ["Scissors","reusable"],["Stapler","reusable"],["Cardboard","consumable"],["Sticky notes","consumable"],
   ["Markers","consumable"],["Colored paper","consumable"],["Printer paper","consumable"],["Tape","consumable"],
@@ -878,7 +893,7 @@ function saveLogisticsRequest(){
  const isGlobalVillage=state.role==="globalvillage";
  let committeeId=isGlobalVillage?"":(currentUserCommitteeId()||document.getElementById("lrCommittee")?.value||"");
  if(!committeeId && !isGlobalVillage)return alert("Please select a committee.");
- if(!["chair","president","globalvillage"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
+ if(!["chair","president","globalvillage","sg","advisory"].includes(state.role))return alert("You do not have permission to submit a logistics request.");
  if(!document.getElementById("lrAgree").checked)return alert("You must accept the materials receipt and return terms.");
  const requests=[];
  document.querySelectorAll(".lrItemCheck").forEach((check,i)=>{
@@ -913,9 +928,9 @@ function saveLogisticsRequest(){
  save();closeModal();go("logisticsRequests");
  alert(isGlobalVillage?"Your Global Village logistics request has been sent to the Head of Logistics.":"Your committee's logistics request has been sent to the Head of Logistics.");
 }
-function markAllLogisticsRead(){if(state.role!=="logistics")return;(state.data.notifications||[]).forEach(n=>{if(n.type==="logistics")n.read=true});save();render()}
-function fulfillLogisticsRequest(id){if(state.role!=="logistics")return;const r=(state.data.logisticsRequests||[]).find(x=>x.id===id);if(!r)return;r.status=r.status==="Fulfilled"?"Pending":"Fulfilled";r.fulfilledAt=r.status==="Fulfilled"?Date.now():null;save();render()}
-function rotateCommitteePassword(id){const c=committee(id);if(!c)return;if(!confirm("Generate a new private grading password for this committee?"))return;c.gradingPassword=generateCommitteePassword();save();openCommitteePanel(id)}
+function markAllLogisticsRead(){if(state.role!=="logistics"&&!hasFullAccess())return;(state.data.notifications||[]).forEach(n=>{if(n.type==="logistics")n.read=true});save();render()}
+function fulfillLogisticsRequest(id){if(state.role!=="logistics"&&!hasFullAccess())return;const r=(state.data.logisticsRequests||[]).find(x=>x.id===id);if(!r)return;r.status=r.status==="Fulfilled"?"Pending":"Fulfilled";r.fulfilledAt=r.status==="Fulfilled"?Date.now():null;save();render()}
+function rotateCommitteePassword(id){state.data.committees=ensureUniqueCommitteePasswords(state.data.committees);save();openCommitteePanel(id)}
 function goToGrading(id){closeModal();state.gradingCommittee=id;go("grading")}
 function setScreenCommittee(id){if(!requireCommitteeAccess(id))return;setScreenState(id,{updated:Date.now()});save();closeModal();go("screen")}
 function populateDelegateSubmitters(){const com=document.getElementById("dpCom"),main=document.getElementById("dpMain"),co=document.getElementById("dpCo");if(!com||!main||!co)return;const ds=state.data.delegates.filter(d=>d.committee===com.value);const opts=ds.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} — ${esc(state.data.countries.find(c=>c.id===d.country)?.name||"")}</option>`).join("");main.innerHTML=opts;co.innerHTML=opts;main.onchange=()=>{const selected=new Set([...main.selectedOptions].map(o=>o.value));[...co.options].forEach(o=>o.disabled=selected.has(o.value));}}
@@ -992,7 +1007,7 @@ function saveScreenDraftFromForm(){
   d.delegation=v("screenCountry")?.value||"";d.country=d.delegation;d.topic=v("screenTopic")?.value||"";d.mode=v("screenMode")?.value||"";
   if(v("screenModeratedSpeakers"))d.moderatedText=v("screenModeratedSpeakers").value;
   d.minutes=v("screenMinutes")?.value??d.minutes;d.seconds=v("screenSeconds")?.value??d.seconds;
-  d.savedAt=Date.now();d.savedBy=screenEditorName();save();return d;
+  d.savedAt=Date.now();d.savedBy=screenEditorName();saveLocalOnly();return d;
 }
 function screenPage(){
   reattachProjector();
@@ -1057,7 +1072,7 @@ function paymentChecklistHtml(){
 function applyPayFilter(){const q=payQuery.trim().toLowerCase();document.querySelectorAll("#paymentChecklist .pay-row").forEach(r=>{r.style.display=!q||r.dataset.q.includes(q)?"":"none"})}
 function filterPayments(v){payQuery=String(v||"");applyPayFilter()}
 function togglePaid(id){
-  if(state.role!=="finance")return alert("Only the Head of Finance can change payment status.");
+  if(state.role!=="finance"&&!hasFullAccess())return alert("Only the Head of Finance can change payment status.");
   const d=state.data.delegates.find(x=>x.id===id);if(!d)return;
   d.paid=!d.paid;d.paidAt=Date.now();
   audit("Delegate payment status changed",`${d.name} → ${d.paid?"Paid":"Not paid"}`,d.committee);
@@ -1220,7 +1235,6 @@ function openScreenWindow(){
   broadcastScreenState(id,getScreenState(id));
 }
 
-setInterval(()=>{state.data.screenStates=normalizeScreenStates(state.data.screenStates);let changed=false;for(const id of Object.keys(state.data.screenStates)){const sc=state.data.screenStates[id];if(!sc.timerRunning)continue;const now=Date.now(),last=Number(sc.updated)||now,el=Math.floor((now-last)/1000);if(el<1)continue;const left=Math.max(0,(Number(sc.timerSeconds)||0)-el);sc.timerSeconds=left;sc.updated=left>0?last+el*1000:now;if(left<=0)sc.timerRunning=false;changed=true;}if(changed){const active=state.data.screen?.committeeId;state.data.screen=active&&state.data.screenStates[active]?{...state.data.screenStates[active]}:state.data.screen;saveLocalOnly();if(remoteReady&&Date.now()-lastRemoteTimerSync>3000){lastRemoteTimerSync=Date.now();pushRemoteState();}if(state.page==="screen"){const el=document.getElementById("chairLiveTimer"),sc=active?state.data.screenStates[active]:null;if(el&&sc){const t=screenRemaining(sc);el.textContent=String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");}}}},1000);
 // Do not re-render the Chairing Panel every second: doing so destroys focus,
 // closes open selects, and interrupts typing. Only refresh the visible live timer text.
 setInterval(()=>{
@@ -1239,7 +1253,7 @@ function committeeResolutionStats(cid){const rs=(state.data.resolutions||[]).fil
 function committeeGradeStats(cid){const countries=(state.data.countries||[]).filter(c=>(c.committees||[]).includes(cid));const grades=state.data.grades||[];const rubric=hRubric(cid),maxScore=rubricTotal(rubric)||100;const rows=countries.map(c=>{const gs=grades.filter(g=>g.committee===cid&&g.country===c.id);const raw=gs.length?gs.reduce((a,g)=>a+(Number(g.total)||0),0)/gs.length:null;const score=raw==null?null:(raw/maxScore)*100;return {country:c,score,graded:gs.length>0};});const scored=rows.filter(x=>x.score!=null).sort((a,b)=>b.score-a.score);const categoryAverages=rubric.map((cat,ci)=>{let sum=0,count=0;for(const g of grades.filter(x=>x.committee===cid)){for(let ri=0;ri<cat.criteria.length;ri++){const v=Number(g.criteria?.[criterionKey(ci,ri)]);if(Number.isFinite(v)){sum+=v;count++;}}}return {name:cat.name,average:count?sum/count:0,max:cat.max};});return {total:countries.length,graded:scored.length,ungraded:rows.filter(x=>!x.graded),average:scored.length?scored.reduce((a,x)=>a+x.score,0)/scored.length:0,highest:scored[0]||null,lowest:scored[scored.length-1]||null,rows:scored,categoryAverages};}
 function committeeTasks(cid){return (state.data.tasks||[]).filter(t=>!t.committee||t.committee===cid);}
 function audit(action,details="",committeeId=""){state.data.auditLog=state.data.auditLog||[];state.data.auditLog.push({id:uid(),createdAt:Date.now(),action,details,committee:committeeId||currentUserCommitteeId()||"",role:state.role,user:window.roles[state.role]?.name||state.role});if(state.data.auditLog.length>1000)state.data.auditLog=state.data.auditLog.slice(-1000);}
-function committeeOverviewPage(){const id=currentUserCommitteeId(),c=committee(id);if(!c)return empty("No committee assigned","Your account has not been assigned to a committee yet.");const dais=state.data.staff.filter(s=>s.committee===id&&["President","Deputy President","Chair"].includes(s.role));const ds=state.data.delegates.filter(d=>d.committee===id),a=committeeAttendanceStats(id),r=committeeResolutionStats(id),g=committeeGradeStats(id),sc=getScreenState(id);const task=committeeTasks(id);const pendingTasks=task.filter(t=>t.status!=="Completed").length;return `<div class="committee-dashboard"><div class="committee-hero"><div><span class="eyebrow">${esc(c.name)} · COMMITTEE DASHBOARD</span><h2>${esc(c.fullName||c.name)}</h2><p>${esc(c.description||"Your committee workspace")}${c.room?` · Room ${esc(c.room)}`:""}</p></div><span class="status in-session">${sc.timerRunning?"LIVE":"READY"}</span></div><div class="metric-grid">${metric("Delegates",ds.length,"Assigned")}${metric("Attendance",`${a.present+a.voting+a.late}/${a.total}`,`${a.absent} absent · ${a.unmarked} unmarked`)}${metric("Graded",`${g.graded}/${g.total}`,`${g.average?g.average.toFixed(1):"0.0"} average`)}${metric("Resolutions",r.total,`${r.onScreen} on screen · ${r.passed} passed`)}</div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Your Dais</h3><p>Committee leadership</p></div></div>${["President","Deputy President","Chair"].map(role=>`<div class="queue"><b>${role[0]}</b><span><strong>${esc(dais.find(x=>x.role===role)?.name||"Unassigned")}</strong><small>${role}</small></span></div>`).join("")}</div><div class="panel"><div class="panel-head"><div><h3>Attendance</h3><p>Live committee attendance</p></div><button class="text-btn" onclick="go('countries')">Manage →</button></div><div class="attendance-summary">${[["Present",a.present],["Present and Voting",a.voting],["Late",a.late],["Absent",a.absent]].map(x=>`<div class="attendance-pill"><strong>${x[1]}</strong><span>${x[0]}</span></div>`).join("")}</div></div></div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Resolution status</h3><p>Committee workflow</p></div><button class="text-btn" onclick="go('resolutions')">Open →</button></div><div class="status-grid">${[["Draft",r.draft],["Submitted",r.submitted],["Under Review",r.review],["Approved",r.approved],["On Chairing Screen",r.onScreen],["Passed",r.passed],["Rejected",r.rejected]].map(x=>`<div class="setting"><strong>${x[1]}</strong><span>${x[0]}</span></div>`).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Grading analytics</h3><p>Only this committee</p></div><button class="text-btn" onclick="go('grading')">Open →</button></div><p><strong>Average:</strong> ${g.average?g.average.toFixed(1):"—"}</p><p><strong>Highest:</strong> ${g.highest?esc(g.highest.country.name)+" · "+g.highest.score.toFixed(1):"—"}</p><p><strong>Lowest:</strong> ${g.lowest?esc(g.lowest.country.name)+" · "+g.lowest.score.toFixed(1):"—"}</p><p><strong>Not graded:</strong> ${g.ungraded.length}</p><div class="mini-list">${g.categoryAverages.map(x=>`<div class="queue"><b>★</b><span><strong>${esc(x.name)}</strong><small>${x.average?x.average.toFixed(1):"0.0"} average</small></span></div>`).join("")}</div><div class="panel" style="margin-top:12px"><div class="panel-head"><div><h4>Top 5 / Top 15</h4><p>Highest graded countries in this committee</p></div></div>${g.rows.slice(0,15).map((x,i)=>`<div class="queue"><b>${i+1}</b><span><strong>${esc(x.country.name)}</strong><small>${x.score.toFixed(1)}</small></span></div>`).join("")||empty("No grades","No countries have been graded yet.")}</div></div></div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Chairing screen</h3><p>${esc(sc.speaker||"No speaker")}${sc.country?` · ${esc(sc.country)}`:""}</p></div><button class="text-btn" onclick="go('screen')">Open →</button></div><div class="big-timer">${String(Math.floor((Number(sc.timerSeconds)||0)/60)).padStart(2,"0")}:${String((Number(sc.timerSeconds)||0)%60).padStart(2,"0")}</div><p>${esc(sc.agenda||"No agenda item")}${sc.nextSpeaker?` · Next: ${esc(sc.nextSpeaker)}`:""}</p></div><div class="panel"><div class="panel-head"><div><h3>Tasks</h3><p>${pendingTasks} open task${pendingTasks===1?"":"s"}</p></div><button class="text-btn" onclick="go('tasks')">Open →</button></div>${task.slice(0,4).map(t=>`<div class="queue"><b>✓</b><span><strong>${esc(t.title)}</strong><small>${esc(t.status)}${t.deadline?` · ${esc(t.deadline)}`:""}</small></span></div>`).join("")||empty("No tasks","No committee tasks assigned.")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Shared by President, Deputy President and Chair</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="secondary" onclick="exportCommitteeGrading()">Export grading</button><button class="secondary" onclick="exportCommitteeAttendance()">Export attendance</button><button class="secondary" onclick="exportCommitteeResolutions()">Export resolutions</button></div></div></div>`;}
+function committeeOverviewPage(){const id=currentUserCommitteeId(),c=committee(id);if(!c)return empty("No committee assigned","Your account has not been assigned to a committee yet.");const dais=state.data.staff.filter(s=>s.committee===id&&["President","Deputy President","Chair"].includes(s.role));const ds=state.data.delegates.filter(d=>d.committee===id),a=committeeAttendanceStats(id),r=committeeResolutionStats(id),g=committeeGradeStats(id),sc=getScreenState(id);const task=committeeTasks(id);const pendingTasks=task.filter(t=>t.status!=="Completed").length;return `<div class="committee-dashboard"><div class="committee-hero"><div><span class="eyebrow">${esc(c.name)} · COMMITTEE DASHBOARD</span><h2>${esc(c.fullName||c.name)}</h2><p>${esc(c.description||"Your committee workspace")}${c.room?` · Room ${esc(c.room)}`:""}</p></div><span class="status in-session">${sc.timerRunning?"LIVE":"READY"}</span></div><div class="metric-grid">${metric("Delegates",ds.length,"Assigned")}${metric("Attendance",`${a.present+a.voting+a.late}/${a.total}`,`${a.absent} absent · ${a.unmarked} unmarked`)}${metric("Graded",`${g.graded}/${g.total}`,`${g.average?g.average.toFixed(1):"0.0"} average`)}${metric("Resolutions",r.total,`${r.onScreen} on screen · ${r.passed} passed`)}</div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Your Dais</h3><p>Committee leadership</p></div></div>${["President","Deputy President","Chair"].map(role=>`<div class="queue"><b>${role[0]}</b><span><strong>${esc(dais.find(x=>x.role===role)?.name||"Unassigned")}</strong><small>${role}</small></span></div>`).join("")}</div><div class="panel"><div class="panel-head"><div><h3>Attendance</h3><p>Live committee attendance</p></div><button class="text-btn" onclick="go('countries')">Manage →</button></div><div class="attendance-summary">${[["Present",a.present],["Present and Voting",a.voting],["Late",a.late],["Absent",a.absent]].map(x=>`<div class="attendance-pill"><strong>${x[1]}</strong><span>${x[0]}</span></div>`).join("")}</div></div></div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Resolution status</h3><p>Committee workflow</p></div><button class="text-btn" onclick="go('resolutions')">Open →</button></div><div class="status-grid">${[["Draft",r.draft],["Submitted",r.submitted],["Under Review",r.review],["Approved",r.approved],["On Chairing Screen",r.onScreen],["Passed",r.passed],["Rejected",r.rejected]].map(x=>`<div class="setting"><strong>${x[1]}</strong><span>${x[0]}</span></div>`).join("")}</div></div><div class="panel"><div class="panel-head"><div><h3>Grading analytics</h3><p>Only this committee</p></div><button class="text-btn" onclick="go('grading')">Open →</button></div><p><strong>Average:</strong> ${g.average?g.average.toFixed(1):"—"}</p><p><strong>Highest:</strong> ${g.highest?esc(g.highest.country.name)+" · "+g.highest.score.toFixed(1):"—"}</p><p><strong>Lowest:</strong> ${g.lowest?esc(g.lowest.country.name)+" · "+g.lowest.score.toFixed(1):"—"}</p><p><strong>Not graded:</strong> ${g.ungraded.length}</p><div class="mini-list">${g.categoryAverages.map(x=>`<div class="queue"><b>★</b><span><strong>${esc(x.name)}</strong><small>${x.average?x.average.toFixed(1):"0.0"} average</small></span></div>`).join("")}</div><div class="panel" style="margin-top:12px"><div class="panel-head"><div><h4>Top 5 / Top 15</h4><p>Highest graded countries in this committee</p></div></div>${g.rows.slice(0,15).map((x,i)=>`<div class="queue"><b>${i+1}</b><span><strong>${esc(x.country.name)}</strong><small>${x.score.toFixed(1)}</small></span></div>`).join("")||empty("No grades","No countries have been graded yet.")}</div></div></div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Chairing screen</h3><p>${esc(sc.speaker||"No speaker")}${sc.country?` · ${esc(sc.country)}`:""}</p></div><button class="text-btn" onclick="go('screen')">Open →</button></div><div class="big-timer">${fmtClock(screenRemaining(sc))}</div><p>${esc(sc.agenda||"No agenda item")}${sc.nextSpeaker?` · Next: ${esc(sc.nextSpeaker)}`:""}</p></div><div class="panel"><div class="panel-head"><div><h3>Tasks</h3><p>${pendingTasks} open task${pendingTasks===1?"":"s"}</p></div><button class="text-btn" onclick="go('tasks')">Open →</button></div>${task.slice(0,4).map(t=>`<div class="queue"><b>✓</b><span><strong>${esc(t.title)}</strong><small>${esc(t.status)}${t.deadline?` · ${esc(t.deadline)}`:""}</small></span></div>`).join("")||empty("No tasks","No committee tasks assigned.")}</div></div><div class="panel"><div class="panel-head"><div><h3>Committee access</h3><p>Shared by President, Deputy President and Chair</p></div><strong class="mono">${esc(c.gradingPassword||"Not assigned")}</strong></div><div class="settings-actions"><button class="secondary" onclick="exportCommitteeGrading()">Export grading</button><button class="secondary" onclick="exportCommitteeAttendance()">Export attendance</button><button class="secondary" onclick="exportCommitteeResolutions()">Export resolutions</button></div></div></div>`;}
 function conferenceDashboardPage(){const cs=state.data.committees||[];const attendance=cs.reduce((n,c)=>{const a=committeeAttendanceStats(c.id);return n+a.present+a.voting+a.late},0),totalCountries=cs.reduce((n,c)=>n+committeeAttendanceStats(c.id).total,0);return `<div class="metric-grid">${metric("Committees",cs.length,"Configured")}${metric("Staff",state.data.staff.length,"Assigned")}${metric("Delegates",state.data.delegates.length,"Registered")}${metric("Resolution papers",state.data.resolutions.length,"All committees")}${metric("Attendance",totalCountries?Math.round(attendance/totalCountries*100)+"%":"0%","Present / voting / late")}${metric("Completed committees",cs.filter(c=>c.completed).length,`${cs.length} total`)}</div><div class="panel"><div class="panel-head"><div><h3>Committee dashboards</h3><p>Each committee has its own independent workspace.</p></div></div><div class="doc-grid">${cs.map(c=>{const a=committeeAttendanceStats(c.id),g=committeeGradeStats(c.id),r=committeeResolutionStats(c.id),sc=getScreenState(c.id);return `<div class="doc resource-card"><div class="doc-type">${esc(c.name)}</div><strong>${esc(c.fullName||c.name)}</strong><span>Room ${esc(c.room||"—")}</span><small>Dais: ${state.data.staff.filter(s=>s.committee===c.id&&["President","Deputy President","Chair"].includes(s.role)).length}/3 · Attendance ${a.present+a.voting+a.late}/${a.total} · Graded ${g.graded}/${g.total}</small><small>Resolutions ${r.total} · ${r.onScreen} on screen · Screen ${sc.timerRunning?"LIVE":"Ready"}</small><button class="text-btn" onclick="openCommitteePanel('${c.id}')">Open committee dashboard →</button></div>`}).join("")||empty("No committees","Create a committee first.")}</div></div>`;}
 function openTask(id=""){const t=(state.data.tasks||[]).find(x=>x.id===id)||{};const committeeOptions='<option value="">Conference-wide</option>'+state.data.committees.map(c=>`<option value="${esc(c.id)}" ${t.committee===c.id?"selected":""}>${esc(c.name)}</option>`).join("");modal(id?"Edit task":"Assign task",`${formField("Task","taskTitle",`value="${esc(t.title||"")}" placeholder="Prepare committee materials"`)}${formField("Assigned to","taskAssignee",`value="${esc(t.assignee||"")}" placeholder="Name or role"`)}${selectField("Committee","taskCommittee",committeeOptions)}${formField("Deadline","taskDeadline",`type="date" value="${esc(t.deadline||"")}"`)}${selectField("Status","taskStatus",["Pending","In Progress","Completed"].map(x=>`<option ${t.status===x?"selected":""}>${x}</option>`).join(""))}<label class="form-label">Notes</label><textarea id="taskNotes" class="form-input" rows="4">${esc(t.notes||"")}</textarea><button class="primary full" onclick="saveTask('${id}')">Save task</button>`)}
 function saveTask(id=""){const title=document.getElementById("taskTitle")?.value.trim();if(!title)return alert("Task title is required.");const obj={id:id||uid(),title,assignee:document.getElementById("taskAssignee")?.value.trim()||"Unassigned",committee:document.getElementById("taskCommittee")?.value||"",deadline:document.getElementById("taskDeadline")?.value||"",status:document.getElementById("taskStatus")?.value||"Pending",notes:document.getElementById("taskNotes")?.value.trim()||"",createdAt:id?((state.data.tasks||[]).find(x=>x.id===id)?.createdAt||Date.now()):Date.now(),updatedAt:Date.now()};state.data.tasks=state.data.tasks||[];const i=state.data.tasks.findIndex(x=>x.id===obj.id);i>=0?state.data.tasks[i]=obj:state.data.tasks.push(obj);audit("Task saved",title,obj.committee);save();closeModal();render();}
@@ -1653,7 +1667,7 @@ function confirmRubricImport(){
 function filterGradeCountries(q){q=String(q||"").toLowerCase().trim();document.querySelectorAll("#countryGradeList .country-grade-card").forEach(e=>e.style.display=(e.dataset.country+" "+e.dataset.delegate).includes(q)?"":"none")}
 async function saveCountryGrade(cid,countryId){audit("Grade saved",String(countryId),cid);if(!canAccessCommitteeGrading(cid))return alert("You do not have access to this committee's grading system.");let criteria={},total=0;const rubric=hRubric(cid);for(let ci=0;ci<rubric.length;ci++){const c=rubric[ci];for(let ri=0;ri<c.criteria.length;ri++){const [n,m]=c.criteria[ri];const e=document.getElementById(`g_${hId(countryId)}_${criterionKey(ci,ri)}`),v=Number(e?.value||0);if(v<0||v>m)return alert(`Score must be between 0 and ${m}.`);criteria[criterionKey(ci,ri)]=v;total+=v;}}
   const notes=document.getElementById(`gn_${hId(countryId)}`)?.value.trim()||"",matches=(state.data.grades||[]).map((g,idx)=>({g,idx})).filter(x=>x.g.committee===cid&&x.g.country===countryId),i=matches.length?matches.reduce((best,x)=>((Number(x.g.updated)||0)>(Number(best.g.updated)||0)?x:best),matches[0]).idx:-1,obj={id:i>=0?state.data.grades[i].id:uid(),schema:3,committee:cid,country:countryId,rubricLanguage:hhhLanguage,criteria,total,score:total,notes,updated:Date.now()};if(i>=0)state.data.grades[i]=obj;else state.data.grades.push(obj);state.data.grades=state.data.grades.filter((g,idx)=>idx===i||!(g.committee===cid&&g.country===countryId&&i>=0));saveLocalOnly();localDirty=true;try{await ensureRemoteReady();if(remoteReady){await pushRemoteState();}}catch(e){console.warn("Grade save failed",e);alert("The grade could not be saved to shared storage. Please try Save grade again.");return}render()}
-function deleteCountryGrade(cid,countryId){if(state.role!=="logistics")return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this country grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId));save();render()}
+function deleteCountryGrade(cid,countryId){if(state.role!=="logistics"&&!hasFullAccess())return alert("Only the Head of Logistics can delete grades without a grading password.");if(!confirm("Delete this country grade?"))return;state.data.grades=state.data.grades.filter(g=>!(g.committee===cid&&g.country===countryId));save();render()}
 function gradingRoom(){
   const c=committee(state.gradingCommittee);
   if(!c)return "";
@@ -1689,7 +1703,7 @@ function gradingRoom(){
     const deleteText=hhhLanguage==="en"?"Delete":hhhLanguage==="fr"?"Supprimer":"حذف";
     return `<details class="country-grade-card" dir="${hhhLanguage==='ar'?'rtl':'ltr'}" data-country="${esc(country.name.toLowerCase())}" data-delegate="${esc((d?.name||"").toLowerCase())}" ${openGradeCountries.has(country.id)?"open":""} ontoggle="setGradeCountryOpen('${country.id}',this.open)">
       <summary><div class="country-grade-meta"><strong>${esc(country.name)}</strong>${d?`<span class="muted">${esc(d.name)}</span>`:""}</div><span class="country-grade-total" id="gt_${hId(country.id)}">${hTotal(g,c.id)}/${rubricTotal(rubric)}</span></summary>
-      <div class="country-grade-body">${cats}<div class="grade-note"><label class="form-label">${hhhLanguage==="ar"?"ملاحظات":hhhLanguage==="fr"?"Remarques":"Notes"}</label><textarea id="gn_${hId(country.id)}" class="form-input" rows="3">${esc(g.notes||"")}</textarea></div><div class="grade-card-actions"><button class="primary" onclick="saveCountryGrade('${c.id}','${country.id}')">${saveText}</button>${state.role==="logistics"&&g.id?`<button class="row-btn danger" onclick="deleteCountryGrade('${c.id}','${country.id}')">${deleteText}</button>`:""}</div></div>
+      <div class="country-grade-body">${cats}<div class="grade-note"><label class="form-label">${hhhLanguage==="ar"?"ملاحظات":hhhLanguage==="fr"?"Remarques":"Notes"}</label><textarea id="gn_${hId(country.id)}" class="form-input" rows="3">${esc(g.notes||"")}</textarea></div><div class="grade-card-actions"><button class="primary" onclick="saveCountryGrade('${c.id}','${country.id}')">${saveText}</button>${(state.role==="logistics"||hasFullAccess())&&g.id?`<button class="row-btn danger" onclick="deleteCountryGrade('${c.id}','${country.id}')">${deleteText}</button>`:""}</div></div>
     </details>`;
   }).join("");
   const desc=hhhLanguage==="en"?"Country-based grading · English rubric":hhhLanguage==="fr"?"Évaluation par pays · barème français":"تقييم حسب الدولة · نموذج التقييم العربي";
