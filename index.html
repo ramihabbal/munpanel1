@@ -40,8 +40,17 @@
 
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+/* Offline/PWA status */
+#offlineStatus{position:fixed;right:14px;bottom:14px;z-index:9999;padding:8px 12px;border:1px solid #cbd5dc;background:#fff;color:#236044;font:600 11px Arial,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.10);border-radius:999px}
+#offlineStatus.offline{color:#8a5200;background:#fff4e5;border-color:#f0c98a}
+#offlineStatus.syncing{color:#155f91;background:#eef7fc;border-color:#b9d9eb}
+</style>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#10171e">
 </head>
 <body>
+<div id="offlineStatus" role="status" aria-live="polite">Online · Local backup enabled</div>
 <div id="uploadLoading" class="upload-loading-overlay hidden" aria-hidden="true">
   <div class="upload-loading-card" role="status" aria-live="polite">
     <div class="upload-spinner"></div>
@@ -287,6 +296,7 @@ function mergeConferenceState(base,local,remote){
 }
 function describeSbError(e){if(!e)return"unknown error";const parts=[e.message||e.error_description||"",e.code?`(code ${e.code})`:"",e.details||"",e.hint?`Hint: ${e.hint}`:""].filter(Boolean);if(parts.length)return parts.join(" ");try{return JSON.stringify(e)}catch(_){return String(e)}}
 async function pullRemoteState(){
+  if(!navigator.onLine){remoteReady=false;remoteError="Offline mode";renderRemoteStatus();return;}
   try{
     const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
     if(error) throw error;
@@ -329,7 +339,7 @@ function renderRemoteStatus(){
 }
 function saveLocalOnly(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state.data))}catch(e){}}
 async function pushRemoteState(){
-  if(!remoteReady)return;
+  if(!remoteReady||!navigator.onLine)return;
   try{
     const {data,error}=await supabaseClient.from("conference_state").select("data").eq("id","main").maybeSingle();
     if(error)throw error;
@@ -385,7 +395,10 @@ async function applyPendingRemote(){
   pendingRemote=false;hideRefreshNotice();
 }
 function refreshNow(){applyPendingRemote().then(()=>{if(state.role){renderShell();render();}});}
+let remoteSyncStarted=false;
 function startRemoteSync(){
+  if(!navigator.onLine||remoteSyncStarted)return;
+  remoteSyncStarted=true;
   try{
     supabaseClient.channel("hhhsmUN-conference-state")
       .on("postgres_changes",{event:"*",schema:"public",table:"conference_state",filter:"id=eq.main"},payload=>{holdIncoming(payload?.new?.data);})
@@ -515,24 +528,52 @@ setTimeout(()=>{pullRemoteState().then(()=>updateLoginCommitteeOptions()).catch(
 function save(){saveLocalOnly();scheduleRemoteSave();}
 const FILE_DB="hhhsmUN_resolution_files";
 function openFileDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(FILE_DB,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files");if(!db.objectStoreNames.contains("resources"))db.createObjectStore("resources")};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-async function storeResourceFile(id,file){
-  if(!(await ensureRemoteReady())) throw new Error(remoteError||"Supabase is not connected");
-  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
-  const path=`resources/${id}-${safeName}`;
-  const {error}=await supabaseClient.storage.from("conference-files").upload(path,file,{upsert:true,contentType:file.type||undefined});
-  if(error)throw error;
-  return path;
-};
-async function storeResolutionFile(id,file){
-  if(!(await ensureRemoteReady())) throw new Error(remoteError||"Supabase is not connected");
-  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
-  const path=`resolutions/${id}-${safeName}`;
-  const {error}=await supabaseClient.storage.from("conference-files").upload(path,file,{upsert:true,contentType:file.type||undefined});
-  if(error)throw error;
-  return path;
+async function putOfflineFile(store,id,file,remotePath=""){
+  const db=await openFileDB();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(store,"readwrite");tx.objectStore(store).put({id,name:file.name,type:file.type||"application/octet-stream",blob:file,remotePath,savedAt:Date.now()},String(id));tx.oncomplete=()=>{db.close();resolve(true)};tx.onerror=()=>{db.close();reject(tx.error)};});
 }
+async function getOfflineFile(store,id){
+  const db=await openFileDB();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(store,"readonly"),req=tx.objectStore(store).get(String(id));req.onsuccess=()=>{const v=req.result;db.close();resolve(v||null)};req.onerror=()=>{db.close();reject(req.error)};});
+}
+async function updateOfflineFile(store,id,patch){
+  const old=await getOfflineFile(store,id);if(!old)return;
+  const db=await openFileDB();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(store,"readwrite");tx.objectStore(store).put({...old,...patch},String(id));tx.oncomplete=()=>{db.close();resolve(true)};tx.onerror=()=>{db.close();reject(tx.error)};});
+}
+async function storeConferenceFile(kind,id,file){
+  const store=kind==="resources"?"resources":"files";
+  await putOfflineFile(store,id,file);
+  if(!navigator.onLine)return `localdb:${kind}:${id}`;
+  try{
+    if(!(await ensureRemoteReady()))return `localdb:${kind}:${id}`;
+    const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+    const path=`${kind}/${id}-${safeName}`;
+    const {error}=await supabaseClient.storage.from("conference-files").upload(path,file,{upsert:true,contentType:file.type||undefined});
+    if(error)throw error;
+    await updateOfflineFile(store,id,{remotePath:path});
+    return path;
+  }catch(e){
+    console.warn("File kept locally; cloud upload will retry when online.",e);
+    return `localdb:${kind}:${id}`;
+  }
+}
+async function storeResourceFile(id,file){return storeConferenceFile("resources",id,file)}
+async function storeResolutionFile(id,file){return storeConferenceFile("resolutions",id,file)}
 async function downloadStorageFile(path,name){
   if(!path)return alert("This file is not available.");
+  if(String(path).startsWith("localdb:")){
+    const [,kind,id]=String(path).split(":");
+    try{
+      const rec=await getOfflineFile(kind==="resources"?"resources":"files",id);
+      if(!rec?.blob)throw new Error("This file is not stored on this device.");
+      const url=URL.createObjectURL(rec.blob),a=document.createElement("a");
+      a.href=url;a.download=name||rec.name||"download";document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+    }catch(e){alert("Unable to open the locally stored file. "+(e?.message||e))}
+    return;
+  }
+  if(!navigator.onLine)return alert("This file is stored in shared storage. Connect to the internet to download it on this device.");
   if(!(await ensureRemoteReady()))return;
   try{
     const {data,error}=await supabaseClient.storage.from("conference-files").download(path);
@@ -541,6 +582,27 @@ async function downloadStorageFile(path,name){
     a.href=url;a.download=name||path.split("/").pop()||"download";document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(e){console.error(e);alert("Unable to download the file.\n\n"+(e?.message||e));}
+}
+async function syncOfflineFiles(){
+  if(!navigator.onLine||!state?.role)return;
+  const jobs=[...(state.data.resources||[]).map(x=>({kind:"resources",item:x})),...(state.data.resolutions||[]).map(x=>({kind:"resolutions",item:x}))];
+  for(const job of jobs){
+    const item=job.item;
+    if(!String(item.filePath||"").startsWith("localdb:"))continue;
+    const [,kind,id]=item.filePath.split(":");
+    try{
+      const rec=await getOfflineFile(kind==="resources"?"resources":"files",id);
+      if(!rec?.blob)continue;
+      if(!(await ensureRemoteReady()))return;
+      const safeName=(rec.name||item.fileName||"file").replace(/[^a-zA-Z0-9._-]/g,"_");
+      const path=`${job.kind}/${id}-${safeName}`;
+      const {error}=await supabaseClient.storage.from("conference-files").upload(path,rec.blob,{upsert:true,contentType:rec.type||undefined});
+      if(error)throw error;
+      item.filePath=path;
+      await updateOfflineFile(kind==="resources"?"resources":"files",id,{remotePath:path});
+      save();
+    }catch(e){console.warn("Offline file sync will retry later.",e);return}
+  }
 }
 async function downloadResolutionFile(id){const r=state.data.resolutions.find(x=>x.id===id);if(!r)return alert("Resolution paper not found.");await downloadStorageFile(r.filePath,r.fileName);}
 async function downloadResourceFile(id){const r=(state.data.resources||[]).find(x=>x.id===id);if(!r)return alert("Resource not found.");await downloadStorageFile(r.filePath,r.fileName);}
@@ -596,8 +658,8 @@ function staffCommitteeId(s){
 function saveSession(){try{sessionStorage.setItem("hhhsmun_session",JSON.stringify({role:state.role,assignedCommittee:state.assignedCommittee,page:state.page}))}catch(e){}}
 async function login(){
  const type=document.getElementById("accountType").value,pass=document.getElementById("password").value.trim();
- // Refresh the shared state first so committee assignments made by Head of Logistics are current.
- await pullRemoteState();
+ // Refresh shared state when online; otherwise use the last locally cached conference copy.
+ if(navigator.onLine) await pullRemoteState();
  updateLoginCommitteeOptions();
  const roleCommitteeMap={president:"President",deputy:"Deputy President",chair:"Chair"};
  const requiredRole=roleCommitteeMap[type];
@@ -1954,6 +2016,39 @@ html body #screenOnly .screen-timer{font-variant-numeric:tabular-nums!important;
     if(pos===SEQ.length){ pos=0; show(); return; }
     timer=setTimeout(function(){pos=0;},4000);
   },true);
+})();
+</script>
+<script id="hhhsmOfflineBootstrap">
+(function(){
+  const badge=document.getElementById("offlineStatus");
+  function status(){
+    if(!badge)return;
+    const online=navigator.onLine;
+    badge.textContent=online?"Online · Local backup enabled":"Offline · Saving on this device";
+    badge.classList.toggle("offline",!online);
+    badge.classList.remove("syncing");
+  }
+  window.addEventListener("online",async function(){
+    if(badge){badge.textContent="Online · Syncing pending changes…";badge.classList.add("syncing");}
+    status();
+    try{
+      if(typeof state!=="undefined" && typeof ensureRemoteReady==="function" && localDirty){
+        if(await ensureRemoteReady()) await pushRemoteState();
+      }else if(typeof pullRemoteState==="function"){
+        await pullRemoteState();
+      }
+      if(typeof syncOfflineFiles==="function")await syncOfflineFiles();
+      if(typeof startRemoteSync==="function")startRemoteSync();
+      if(typeof updateLoginCommitteeOptions==="function")updateLoginCommitteeOptions();
+    }catch(e){console.warn("Reconnect sync deferred",e)}
+    status();
+  });
+  window.addEventListener("offline",status);
+  status();
+  if(navigator.storage&&navigator.storage.persist){navigator.storage.persist().catch(()=>{});}
+  if("serviceWorker" in navigator && (location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){
+    window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(e=>console.warn("Offline cache registration failed",e)));
+  }
 })();
 </script>
 </body>
