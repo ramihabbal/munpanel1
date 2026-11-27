@@ -1,0 +1,10 @@
+{
+  "name": "HHHSMUN Conference Management",
+  "short_name": "HHHSMUN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f8",
+  "theme_color": "#10171e",
+  "description": "HHHSMUN conference management with offline access"
+}
